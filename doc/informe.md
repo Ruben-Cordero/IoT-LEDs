@@ -608,3 +608,337 @@ Las prácticas aplicadas en la implementación son:
 - **Nombres descriptivos:** funciones como <code>medirDistanciaCm()</code>, <code>clasificarDistancia()</code> y <code>apagarTodos()</code> expresan su propósito.
 
 La implementación también incorpora decisiones que apoyan los requerimientos no funcionales: el timeout limita la espera ante ausencia de eco, la histéresis reduce oscilaciones y la espera de 100 ms establece una actualización periódica. Estos mecanismos constituyen evidencia de diseño e implementación, pero los valores reales de estabilidad, exactitud, respuesta y muestreo deberán confirmarse mediante las pruebas correspondientes.
+
+# 4. Pruebas y Validaciones
+
+## 4.1 Objetivo y estrategia
+
+El plan de pruebas tiene como objetivo comprobar de manera trazable los requerimientos RF1–RF3 y RNF1–RNF5 definidos en la sección 1. Las verificaciones se dividen en dos grupos para no confundir evidencia de software con evidencia experimental:
+
+1. **Pruebas de software ejecutadas:** revisión estática, compilación del firmware y pruebas automatizadas de la clasificación. No requieren el circuito físico.
+2. **Pruebas experimentales pendientes:** medición del sensor, respuesta de los LEDs, exactitud, estabilidad, tiempo de respuesta y frecuencia real. Requieren el ESP32 y el circuito montado.
+
+Una prueba solo se registra como aprobada cuando existe un resultado observable que cumple su criterio de aceptación. Las pruebas experimentales se mantienen como **pendientes** hasta que el equipo las ejecute y complete las tablas de evidencia; no se asignan resultados supuestos.
+
+## 4.2 Plan general de pruebas
+
+| Identificador | Tipo | Requisitos cubiertos | Objetivo | Estado |
+| --- | --- | --- | --- | --- |
+| <code>PR-COMPILACION-001</code> | Software, ejecutada | RNF5 | Verificar que todos los módulos puedan compilarse y enlazarse para el ESP32. | **Aprobada** |
+| <code>PR-CLASIFICACION-001</code> | Automatizada, ejecutada | RF2, RNF5 | Validar rangos, límites, errores, recuperación e histéresis sin depender del sensor físico. | **Aprobada: 20/20** |
+| <code>PR-CALIDAD-CODIGO-001</code> | Estática, ejecutada | RNF5 | Comprobar separación de responsabilidades, interfaces y manejo seguro del indicador. | **Aprobada: 7/7** |
+| <code>PR-ANALISIS-TEMPORAL-001</code> | Analítica, ejecutada | RNF3, RNF4 | Comprobar si los tiempos configurados son compatibles, en teoría, con los objetivos de respuesta y muestreo. | **Compatible por diseño** |
+| <code>PR-SENSOR-001</code> | Experimental | RF1 | Confirmar que el HC-SR04 produce lecturas coherentes en distintas distancias. | **Pendiente** |
+| <code>PR-INDICADOR-001</code> | Experimental | RF3 | Confirmar la correspondencia entre distancia, rango y LED, incluida la condición de error. | **Pendiente** |
+| <code>PR-HISTERESIS-001</code> | Experimental | RF2, RNF1 | Observar que el indicador no oscile cuando el objeto se mantiene cerca de los umbrales. | **Pendiente** |
+| <code>PR-EXACTITUD-001</code> | Experimental y cuantitativa | RNF2 | Calcular el error de medición respecto a una cinta métrica. | **Pendiente** |
+| <code>PR-RESPUESTA-001</code> | Experimental y cuantitativa | RNF3 | Medir el tiempo real entre un cambio de rango y la actualización del LED. | **Pendiente** |
+| <code>PR-MUESTREO-001</code> | Experimental y cuantitativa | RNF4 | Medir cuántas lecturas completa el sistema por segundo. | **Pendiente** |
+| <code>PR-ESTABILIDAD-001</code> | Experimental y cuantitativa | RNF1 | Comprobar 10 minutos de operación continua sin reinicios ni bloqueos. | **Pendiente** |
+
+## 4.3 Entorno de las pruebas de software
+
+Las pruebas ejecutadas el 13 de septiembre de 2026 utilizaron las siguientes herramientas:
+
+| Elemento | Configuración |
+| --- | --- |
+| Gestor del proyecto | PlatformIO Core 6.2.0 |
+| Compilación del firmware | Entorno <code>esp32dev</code>, framework Arduino |
+| Pruebas automatizadas | Entorno <code>native</code> ejecutado en el equipo de desarrollo |
+| Framework de pruebas | Unity 2.6.1 |
+| Archivo probado automáticamente | <code>src/ClasificadorDistancia.cpp</code> |
+| Archivo de casos de prueba | <code>test/test_clasificacion/test_main.cpp</code> |
+
+Se añadió un entorno nativo en [<code>platformio.ini</code>](../platformio.ini) para ejecutar la lógica que no depende del hardware:
+
+~~~ini
+[env:native]
+platform = native
+test_framework = unity
+test_build_src = yes
+build_src_filter = +<ClasificadorDistancia.cpp>
+~~~
+
+La selección de un único archivo fuente es deliberada: el clasificador solo procesa datos y puede probarse en una computadora, mientras que <code>SensorUltrasonico</code> e <code>IndicadorLeds</code> necesitan las funciones y conexiones físicas del ESP32.
+
+## 4.4 Pruebas de software ejecutadas
+
+### 4.4.1 <code>PR-COMPILACION-001</code> — Compilación completa para ESP32
+
+**Propósito:** comprobar que las declaraciones, implementaciones e integraciones del firmware son aceptadas por la plataforma de destino.
+
+**Procedimiento:** ejecutar desde la raíz del proyecto:
+
+~~~text
+platformio run -e esp32dev
+~~~
+
+**Criterio de aceptación:** la construcción debe finalizar con estado <code>SUCCESS</code>, sin errores de compilación ni de enlazado.
+
+**Resultado obtenido:** aprobado.
+
+| Indicador | Resultado |
+| --- | ---: |
+| Entornos construidos correctamente | 1 de 1 |
+| Estado de PlatformIO | <code>SUCCESS</code> |
+| RAM utilizada | 21 120 bytes de 327 680 bytes (6,4 %) |
+| Memoria flash utilizada | 240 869 bytes de 1 310 720 bytes (18,4 %) |
+
+La compilación incluyó <code>ClasificadorDistancia.cpp</code>, <code>IndicadorLeds.cpp</code>, <code>SensorUltrasonico.cpp</code> y <code>main.cpp</code>. Este resultado demuestra compatibilidad de construcción, pero no reemplaza la ejecución sobre el circuito.
+
+### 4.4.2 <code>PR-CLASIFICACION-001</code> — Pruebas automatizadas
+
+**Propósito:** verificar la clasificación con valores controlados, especialmente aquellos difíciles de producir exactamente con el HC-SR04, como 20,00; 22,00; 38,00; 40,00 y 42,00 cm.
+
+**Procedimiento:** ejecutar:
+
+~~~text
+platformio test -e native
+~~~
+
+**Criterio de aceptación:** los 20 casos deben aprobar y los límites configurables deben conservar un orden válido.
+
+Los casos implementados en [<code>test/test_clasificacion/test_main.cpp</code>](../test/test_clasificacion/test_main.cpp) fueron:
+
+| Caso | Lectura | Válida | Rango anterior | Resultado esperado | Resultado |
+| --- | ---: | :---: | --- | --- | --- |
+| C01 | 15,00 cm | No | <code>CERCANO</code> | <code>ERROR</code> | **Aprobado** |
+| C02 | 1,99 cm | Sí | <code>ERROR</code> | <code>ERROR</code> | **Aprobado** |
+| C03 | 2,00 cm | Sí | <code>ERROR</code> | <code>CERCANO</code> | **Aprobado** |
+| C04 | 19,99 cm | Sí | <code>ERROR</code> | <code>CERCANO</code> | **Aprobado** |
+| C05 | 20,00 cm | Sí | <code>ERROR</code> | <code>MEDIO</code> | **Aprobado** |
+| C06 | 39,99 cm | Sí | <code>ERROR</code> | <code>MEDIO</code> | **Aprobado** |
+| C07 | 40,00 cm | Sí | <code>ERROR</code> | <code>LEJANO</code> | **Aprobado** |
+| C08 | 200,00 cm | Sí | <code>ERROR</code> | <code>LEJANO</code> | **Aprobado** |
+| C09 | 200,01 cm | Sí | <code>ERROR</code> | <code>ERROR</code> | **Aprobado** |
+| C10 | 21,99 cm | Sí | <code>CERCANO</code> | <code>CERCANO</code> | **Aprobado** |
+| C11 | 22,00 cm | Sí | <code>CERCANO</code> | <code>MEDIO</code> | **Aprobado** |
+| C12 | 100,00 cm | Sí | <code>CERCANO</code> | <code>LEJANO</code> | **Aprobado** |
+| C13 | 18,00 cm | Sí | <code>MEDIO</code> | <code>MEDIO</code> | **Aprobado** |
+| C14 | 17,99 cm | Sí | <code>MEDIO</code> | <code>CERCANO</code> | **Aprobado** |
+| C15 | 41,99 cm | Sí | <code>MEDIO</code> | <code>MEDIO</code> | **Aprobado** |
+| C16 | 42,00 cm | Sí | <code>MEDIO</code> | <code>LEJANO</code> | **Aprobado** |
+| C17 | 38,00 cm | Sí | <code>LEJANO</code> | <code>LEJANO</code> | **Aprobado** |
+| C18 | 37,99 cm | Sí | <code>LEJANO</code> | <code>MEDIO</code> | **Aprobado** |
+| C19 | 10,00 cm | Sí | <code>LEJANO</code> | <code>CERCANO</code> | **Aprobado** |
+| C20 | 25,00 cm | Sí | <code>ERROR</code> | <code>MEDIO</code> | **Aprobado** |
+
+**Resultado consolidado:** 20 casos ejecutados, 20 aprobados y 0 fallidos. También aprobaron cuatro comprobaciones realizadas durante la compilación del test: mínimo < primer umbral < segundo umbral < máximo, y margen de histéresis no negativo.
+
+### 4.4.3 <code>PR-CALIDAD-CODIGO-001</code> — Revisión estática
+
+**Propósito:** verificar propiedades de organización que no requieren encender la placa.
+
+| Caso | Comprobación | Evidencia revisada | Resultado |
+| --- | --- | --- | --- |
+| E01 | Existe un único tipo compartido para la medición. | No existe <code>LecturaSensor</code>; sensor y clasificador incluyen <code>LecturaDistancia.h</code>. | **Aprobado** |
+| E02 | El ciclo principal integra los tres módulos. | <code>main.cpp</code> llama a <code>medirDistanciaCm()</code>, <code>clasificarDistancia()</code> y <code>mostrar()</code>. | **Aprobado** |
+| E03 | <code>main.cpp</code> no controla directamente los GPIO. | No contiene <code>pinMode()</code>, <code>digitalWrite()</code> ni <code>pulseIn()</code>. | **Aprobado** |
+| E04 | El clasificador es independiente del hardware. | No incluye Arduino ni utiliza pines, esperas o lectura de pulsos. | **Aprobado** |
+| E05 | Los umbrales están ordenados. | Comprobaciones <code>static_assert</code> ejecutadas al compilar las pruebas. | **Aprobado** |
+| E06 | Solo puede quedar encendido el LED seleccionado. | <code>mostrar()</code> ejecuta <code>apagarTodos()</code> antes de evaluar el estado. | **Aprobado** |
+| E07 | El error produce una salida segura y definida. | El caso <code>EstadoIndicador::Error</code> no ejecuta ningún encendido después de apagar las salidas. | **Aprobado** |
+
+**Resultado consolidado:** 7 verificaciones realizadas y 7 aprobadas.
+
+### 4.4.4 <code>PR-ANALISIS-TEMPORAL-001</code> — Comprobación analítica
+
+El ciclo incorpora una espera de 100 ms y el sensor limita la espera del eco a 30 ms. Sin considerar el pequeño tiempo adicional de procesamiento, un ciclo desfavorable se aproxima a:
+
+~~~text
+100 ms de espera + 30 ms de timeout = 130 ms por ciclo
+1 000 ms / 130 ms ≈ 7,69 ciclos por segundo
+~~~
+
+Este valor teórico es compatible con RNF4 (al menos 2 lecturas por segundo). Del mismo modo, un cambio físico que ocurra justo después de una lectura debería esperar como máximo aproximadamente un ciclo antes de reflejarse, valor inferior al objetivo de 1 segundo de RNF3.
+
+El resultado se registra como **compatible por diseño**, no como validación definitiva. La planificación del sistema operativo, las características reales del sensor y el montaje pueden añadir variación; por eso RNF3 y RNF4 conservan pruebas experimentales pendientes.
+
+## 4.5 Preparación de las pruebas experimentales
+
+### 4.5.1 Equipo necesario
+
+- ESP32 con el firmware cargado.
+- HC-SR04 conectado mediante divisor de tensión en ECHO.
+- Tres LEDs con sus resistencias limitadoras de 330 Ω.
+- Objeto plano y estable, colocado perpendicularmente al sensor.
+- Cinta métrica o regla con resolución mínima de 1 mm.
+- Cronómetro y, para el tiempo de respuesta, cámara de video o teléfono con grabación de al menos 60 cuadros por segundo.
+- Computadora con PlatformIO para registrar las lecturas cuando la prueba necesite valores numéricos.
+
+### 4.5.2 Condiciones de ensayo
+
+- Realizar las mediciones en un espacio interior sin obstáculos cercanos al cono de detección.
+- Mantener firmes el sensor, la cinta métrica y el objeto.
+- Medir desde la cara frontal de los transductores del HC-SR04 hasta la superficie del objeto.
+- Esperar a que la lectura se estabilice antes de registrar cada posición.
+- Reiniciar el ESP32 antes de los casos que comprueben exactamente el rango inicial.
+- Registrar fecha, integrante responsable, condiciones del entorno y cualquier comportamiento anormal.
+
+### 4.5.3 Instrumentación para valores numéricos
+
+El firmware final comunica el resultado mediante LEDs y no imprime datos por el puerto serie. Para <code>PR-SENSOR-001</code>, <code>PR-EXACTITUD-001</code> y <code>PR-MUESTREO-001</code> se debe utilizar temporalmente una versión de diagnóstico que envíe por el monitor serie, a 115 200 baudios, los siguientes datos por ciclo:
+
+~~~text
+tiempo_ms, distancia_cm, valida, rango
+~~~
+
+Esta instrumentación se utiliza exclusivamente para observar y registrar resultados; no debe modificar los umbrales, la histéresis ni el control de los LEDs. El informe final deberá indicar qué versión o commit se utilizó para obtener la evidencia.
+
+## 4.6 Casos experimentales pendientes
+
+### 4.6.1 <code>PR-SENSOR-001</code> y <code>PR-EXACTITUD-001</code>
+
+**Requisitos:** RF1 y RNF2.
+
+**Objetivo:** confirmar que la distancia medida cambia de forma coherente y que el error máximo es ≤ ±3 cm.
+
+**Procedimiento:**
+
+1. Activar la salida de diagnóstico descrita en 4.5.3.
+2. Colocar el objeto en 10, 20, 30, 40, 60, 100, 150 y 200 cm.
+3. En cada posición, esperar la estabilización y registrar tres lecturas consecutivas.
+4. Calcular el promedio de las tres lecturas.
+5. Calcular el error absoluto: <code>|promedio medido − distancia de referencia|</code>.
+
+**Criterios de aceptación:** todas las posiciones deben producir una lectura válida; las mediciones deben aumentar al alejar el objeto; y el error absoluto máximo debe ser ≤ 3 cm.
+
+| Referencia | Lectura 1 | Lectura 2 | Lectura 3 | Promedio | Error absoluto | ¿Cumple? |
+| ---: | ---: | ---: | ---: | ---: | ---: | :---: |
+| 10 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 20 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 30 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 40 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 60 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 100 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 150 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 200 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+
+### 4.6.2 <code>PR-INDICADOR-001</code>
+
+**Requisito:** RF3.
+
+**Objetivo:** comprobar el comportamiento conjunto sensor → clasificador → indicador.
+
+| Caso | Preparación | Resultado esperado | Resultado observado | Estado |
+| --- | --- | --- | --- | --- |
+| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Pendiente | Pendiente |
+| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Pendiente | Pendiente |
+| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Pendiente | Pendiente |
+| I04 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Pendiente | Pendiente |
+| I05 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Pendiente | Pendiente |
+
+**Procedimiento:** colocar el objeto en cada condición, esperar al menos un segundo y observar los tres LEDs. En ningún caso válido pueden permanecer encendidos dos LEDs simultáneamente.
+
+**Criterio de aceptación:** los cinco casos deben coincidir con la salida esperada.
+
+### 4.6.3 <code>PR-HISTERESIS-001</code>
+
+**Requisitos:** RF2 y RNF1.
+
+**Objetivo:** confirmar que pequeñas variaciones alrededor de 20 y 40 cm no producen oscilación continua del indicador.
+
+| Secuencia | Estado inicial | Distancias aplicadas en orden | Resultado esperado |
+| --- | --- | --- | --- |
+| H01 | <code>CERCANO</code> | 19 → 21 → 19 → 21 cm | Permanece rojo durante toda la secuencia. |
+| H02 | <code>CERCANO</code> | 21 → 22 cm | Permanece rojo en 21 cm y cambia a amarillo al alcanzar 22 cm. |
+| H03 | <code>MEDIO</code> | 20 → 19 → 18 → 17 cm | Permanece amarillo hasta 18 cm y cambia a rojo en 17 cm. |
+| H04 | <code>MEDIO</code> | 39 → 41 → 39 → 41 cm | Permanece amarillo durante toda la secuencia. |
+| H05 | <code>MEDIO</code> | 41 → 42 cm | Permanece amarillo en 41 cm y cambia a verde al alcanzar 42 cm. |
+| H06 | <code>LEJANO</code> | 40 → 39 → 38 → 37 cm | Permanece verde hasta 38 cm y cambia a amarillo en 37 cm. |
+
+**Procedimiento:** utilizar el valor mostrado por la instrumentación de diagnóstico para posicionar el objeto, aplicar cada secuencia lentamente y registrar el color observado después de cada lectura.
+
+**Criterio de aceptación:** las seis secuencias deben mantener o cambiar el estado en los puntos indicados, sin parpadeo alternado mientras el objeto permanece dentro de la banda de histéresis.
+
+### 4.6.4 <code>PR-RESPUESTA-001</code>
+
+**Requisito:** RNF3.
+
+**Objetivo:** comprobar que el cambio de LED ocurre en menos de 1 segundo.
+
+**Procedimiento:**
+
+1. Mantener el objeto a 10 cm hasta observar el LED rojo estable.
+2. Iniciar una grabación de al menos 60 cuadros por segundo.
+3. Mover rápidamente el objeto hasta 60 cm.
+4. Determinar el cuadro donde el objeto alcanza la nueva marca y el cuadro donde se enciende el LED verde.
+5. Calcular <code>tiempo = cuadros transcurridos / cuadros por segundo</code>.
+6. Repetir cinco veces y registrar el peor resultado.
+
+| Repetición | Cuadros transcurridos | FPS del video | Tiempo calculado | ¿Menor a 1 s? |
+| ---: | ---: | ---: | ---: | :---: |
+| 1 | Pendiente | Pendiente | Pendiente | Pendiente |
+| 2 | Pendiente | Pendiente | Pendiente | Pendiente |
+| 3 | Pendiente | Pendiente | Pendiente | Pendiente |
+| 4 | Pendiente | Pendiente | Pendiente | Pendiente |
+| 5 | Pendiente | Pendiente | Pendiente | Pendiente |
+
+**Criterio de aceptación:** las cinco mediciones deben ser menores a 1 segundo.
+
+### 4.6.5 <code>PR-MUESTREO-001</code>
+
+**Requisito:** RNF4.
+
+**Objetivo:** verificar que el sistema completa al menos dos lecturas por segundo.
+
+**Procedimiento:** con la salida de diagnóstico activa, registrar durante 10 segundos todas las líneas generadas. Dividir la cantidad de lecturas registradas entre el tiempo efectivo del registro.
+
+~~~text
+frecuencia = cantidad de lecturas / duración en segundos
+~~~
+
+| Duración | Lecturas registradas | Frecuencia calculada | Criterio | Estado |
+| ---: | ---: | ---: | ---: | --- |
+| 10 s | Pendiente | Pendiente | ≥ 2 lecturas/s | Pendiente |
+
+### 4.6.6 <code>PR-ESTABILIDAD-001</code>
+
+**Requisito:** RNF1.
+
+**Objetivo:** comprobar operación continua durante al menos 10 minutos.
+
+**Procedimiento:**
+
+1. Encender el sistema e iniciar un cronómetro.
+2. Mantenerlo funcionando durante 10 minutos sin reiniciarlo.
+3. Cada dos minutos, colocar el objeto sucesivamente en un rango diferente y comprobar la respuesta.
+4. Registrar reinicios, bloqueos, lecturas detenidas, LEDs incorrectos o calentamiento anormal.
+
+| Tiempo | Condición aplicada | Respuesta esperada | Respuesta observada | Incidencias |
+| ---: | --- | --- | --- | --- |
+| 0 min | 10 cm | Rojo | Pendiente | Pendiente |
+| 2 min | 30 cm | Amarillo | Pendiente | Pendiente |
+| 4 min | 60 cm | Verde | Pendiente | Pendiente |
+| 6 min | Sin eco | Todos apagados | Pendiente | Pendiente |
+| 8 min | 10 cm | Rojo | Pendiente | Pendiente |
+| 10 min | 60 cm | Verde | Pendiente | Pendiente |
+
+**Criterio de aceptación:** completar los 10 minutos sin reinicios ni bloqueos y responder correctamente en los seis puntos de observación.
+
+## 4.7 Registro consolidado de validación
+
+Cuando el equipo termine las pruebas experimentales, debe actualizar esta tabla y adjuntar fotografías, capturas, registros del monitor serie o videos en los anexos.
+
+| Prueba | Fecha | Responsable | Resultado cuantitativo o evidencia | Estado final |
+| --- | --- | --- | --- | --- |
+| <code>PR-COMPILACION-001</code> | 13/09/2026 | Verificación automatizada | PlatformIO <code>SUCCESS</code>; RAM 6,4 %; flash 18,4 % | **Aprobada** |
+| <code>PR-CLASIFICACION-001</code> | 13/09/2026 | Verificación automatizada | 20/20 casos aprobados | **Aprobada** |
+| <code>PR-CALIDAD-CODIGO-001</code> | 13/09/2026 | Revisión estática | 7/7 verificaciones aprobadas | **Aprobada** |
+| <code>PR-ANALISIS-TEMPORAL-001</code> | 13/09/2026 | Análisis del código | Aproximación desfavorable: 7,69 ciclos/s y 130 ms | **Compatible; pendiente de medición** |
+| <code>PR-SENSOR-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| <code>PR-INDICADOR-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| <code>PR-HISTERESIS-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| <code>PR-EXACTITUD-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| <code>PR-RESPUESTA-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| <code>PR-MUESTREO-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| <code>PR-ESTABILIDAD-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+
+## 4.8 Reglas para cerrar la validación
+
+- No reemplazar la palabra “Pendiente” hasta ejecutar realmente el procedimiento.
+- Conservar los datos originales aunque alguna prueba falle.
+- Si un resultado no cumple, registrar la diferencia, la causa probable y la corrección aplicada; después ejecutar una nueva repetición sin borrar el resultado anterior.
+- Utilizar las mismas unidades declaradas: centímetros, milisegundos, segundos y lecturas por segundo.
+- Vincular cada fotografía, video o registro con el identificador de la prueba correspondiente.
+- Considerar los requerimientos validados únicamente cuando todas las pruebas asociadas tengan evidencia y cumplan sus criterios de aceptación.
