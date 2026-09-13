@@ -1,193 +1,217 @@
 # 1. Requerimientos Funcionales y No Funcionales
 
+El objeto inteligente se implementa con un microcontrolador ESP32, un sensor ultrasónico HC-SR04 y tres LEDs. Su propósito es medir la distancia hasta un objeto, clasificarla y presentar el resultado mediante una señal visual fácil de interpretar.
+
 ## 1.1 Requerimientos funcionales
 
-El sistema objeto inteligente está definido como un subsistema de medición y visualización de proximidad, construido sobre un ESP32, un sensor ultrasónico HC-SR04 y un conjunto de tres LEDs. El sistema debe detectar la distancia entre el sensor y un objeto, clasificar esa distancia en rangos contiguos y no solapados, y activar un actuador visual distinto para cada rango.
+| Identificador | Requerimiento | Criterio de aceptación |
+| --- | --- | --- |
+| **RF1** | El sistema debe medir la distancia entre el HC-SR04 y un objeto. | Cada medición debe producir una distancia en centímetros acompañada por un indicador de validez. La ausencia de eco y los valores físicamente inválidos deben reconocerse como lectura inválida. |
+| **RF2** | El sistema debe interpretar la medición y clasificarla en tres rangos contiguos y sin solapamiento. | Toda lectura válida dentro del rango de trabajo debe producir exactamente uno de estos resultados: <code>CERCANO</code>, <code>MEDIO</code> o <code>LEJANO</code>. |
+| **RF3** | El sistema debe activar un actuador diferente según el rango detectado. | Para una lectura válida debe encenderse únicamente el LED asociado al rango. Ante una lectura inválida o fuera del rango de trabajo, los tres LEDs deben permanecer apagados. |
 
-### 1.1.1 RF1. Medición de distancia entre sensor y objeto
+### 1.1.1 Rangos y lógica de control
 
-El sistema debe medir la distancia entre el sensor ultrasónico HC-SR04 y un objeto presente en el campo de observación. La medida se obtiene por el módulo `SensorUltrasonico`, que dispara el pulso ultrasónico y calcula la distancia en centímetros a partir del tiempo de retorno del eco. La salida del módulo se representa mediante la estructura `LecturaDistancia`, que incluye la distancia calculada y un indicador de validez.
+El rango de trabajo definido para el objeto inteligente es de 2 a 200 cm, ambos límites incluidos. La clasificación base y la respuesta visual son:
 
-El comportamiento requerido es que, si la lectura es válida, la información se entregue al flujo principal de control para su clasificación. Si la lectura no se recibe o la distancia queda fuera del rango de trabajo declarado, el sistema debe marcar la lectura como inválida y no confiar en el valor para la activación de LEDs.
+| Distancia o condición | Rango lógico | Respuesta del actuador |
+| --- | --- | --- |
+| Lectura inválida, sin eco, menor que 2 cm o mayor que 200 cm | <code>ERROR</code> | Todos los LEDs apagados. |
+| 2 cm ≤ distancia < 20 cm | <code>CERCANO</code> | LED rojo encendido; amarillo y verde apagados. |
+| 20 cm ≤ distancia < 40 cm | <code>MEDIO</code> | LED amarillo encendido; rojo y verde apagados. |
+| 40 cm ≤ distancia ≤ 200 cm | <code>LEJANO</code> | LED verde encendido; rojo y amarillo apagados. |
 
-### 1.1.2 RF2. Interpretación y clasificación de la distancia en rangos contiguos y no solapados
+Los intervalos válidos son contiguos: terminando un rango comienza inmediatamente el siguiente. Tampoco se solapan, porque una misma distancia no puede pertenecer a dos intervalos al mismo tiempo. Los valores exactos de 20 y 40 cm se asignan al rango superior.
 
-El sistema debe interpretar la distancia leída y clasificarla en al menos tres rangos contiguos y sin solapamiento. La clasificación se implementa en el módulo `ClasificadorDistancia` mediante umbrales configurables y una lógica de histéresis que estabiliza la transición entre rangos.
+Para evitar cambios repetidos de color provocados por pequeñas variaciones de medición cerca de los límites, se declara un margen de histéresis de 2 cm. La histéresis no crea un cuarto rango; solamente determina cuándo se confirma una transición:
 
-La lógica de control documentada para el proyecto define el rango de trabajo de 2 cm a 200 cm. Los rangos de distancia y su correspondencia visual son los siguientes:
+| Estado actual | Transición confirmada |
+| --- | --- |
+| <code>CERCANO</code> | Cambia al superar el límite cercano con el margen definido: distancia ≥ 22 cm. |
+| <code>MEDIO</code> | Cambia a <code>CERCANO</code> cuando la distancia < 18 cm y a <code>LEJANO</code> cuando la distancia ≥ 42 cm. |
+| <code>LEJANO</code> | Cambia al descender por debajo del límite lejano con el margen definido: distancia < 38 cm. |
+| <code>ERROR</code> | La siguiente lectura válida se clasifica directamente con los límites base de 20 y 40 cm. |
 
-| Intervalo de distancia | LED activado | Estado visual |
-|---|---|---|
-| 2 cm ≤ d < 20 cm | Rojo | LED rojo encendido |
-| 20 cm ≤ d < 40 cm | Amarillo | LED amarillo encendido |
-| 40 cm ≤ d ≤ 200 cm | Verde | LED verde encendido |
-| lectura inválida, sin eco o fuera del rango de trabajo | Apagado | los tres LEDs apagados y aviso por el puerto serie |
-
-La representación anterior cumple la condición de disyunción de intervalos: el valor del umbral se asigna al rango superior y cada distancia pertenece a un único intervalo. La clasificación considera también el caso de lectura inválida, sin eco o fuera del rango de trabajo, que no produce activación visual y genera un aviso por el puerto serie.
-
-La lógica de control aplica además un margen de estabilidad de 2 cm alrededor de cada umbral para evitar oscilaciones del LED cuando el objeto queda justo en el límite de transición. Este margen se documenta como decisión de diseño: el cambio de rango solo se produce cuando la distancia supera el umbral por ese margen de estabilidad. Por ejemplo, la transición entre el rango cercano y el rango medio se produce al superar 20 cm en 2 cm, es decir, cuando la distancia pasa de un valor cercano a 18 cm o se mantiene por debajo de 20 cm, y el cambio hacia el siguiente rango solo ocurre si la distancia supera el umbral por el margen definido. La misma regla aplica en el umbral de 40 cm. La política de margen es compatible con el error de medición declarado de ±3 cm con respecto a una cinta métrica, porque la decisión de cambio de rango no se activa en un punto exacto del umbral sino con una zona de tolerancia documentada.
-
-### 1.1.3 RF3. Activación de los actuadores según el rango detectado
-
-El sistema debe activar los actuadores de forma diferenciada según el rango detectado. El módulo `IndicadorLeds` recibe un `EstadoIndicador` y activa un LED distinto para cada nivel de proximidad: rojo para el rango cercano, amarillo para el rango medio, y verde para el rango lejano. El estado de error o lectura inválida se representa mediante apagado de todos los LEDs y un mensaje de aviso por el puerto serie.
-
-La interacción entre módulos se coordina desde `main.cpp`, que realiza el ciclo de lectura, clasificación, conversión del rango a un estado de indicador y envío del comando de visualización. El comportamiento requerido es determinista y consistente con los rangos definidos en RF2: una sola salida de hardware debe quedar encendida para cada lectura válida y los LEDs restantes deben permanecer apagados.
+En todos los casos, cada ciclo termina con un único rango lógico y, como máximo, un LED encendido.
 
 ## 1.2 Requerimientos no funcionales
 
-Los requerimientos no funcionales deben expresarse con valores medibles y verificables en las pruebas. Los valores declarados a continuación constituyen objetivos de diseño para la validación del sistema.
+Los siguientes valores se declaran como objetivos medibles. Su cumplimiento deberá demostrarse posteriormente en la sección de Pruebas y Validaciones.
 
-### 1.2.1 RNF1. Estabilidad operativa
+| Identificador | Atributo | Requerimiento medible | Forma prevista de verificación |
+| --- | --- | --- | --- |
+| **RNF1** | Estabilidad | El sistema debe operar durante al menos 10 minutos sin reinicios, bloqueos ni interrupciones del ciclo de medición y visualización. | Prueba continua cronometrada y registro de cualquier reinicio o bloqueo. |
+| **RNF2** | Exactitud | El error de medición debe ser como máximo ±3 cm dentro del rango declarado de 2 a 200 cm. | Comparación de las lecturas con distancias marcadas mediante una cinta métrica. |
+| **RNF3** | Tiempo de respuesta | El LED debe reflejar un cambio de rango en menos de 1 segundo. | Medición del tiempo desde el cambio físico de distancia hasta la actualización del indicador. |
+| **RNF4** | Frecuencia de muestreo | El sistema debe completar al menos 2 lecturas por segundo. | Conteo de lecturas válidas e inválidas durante un intervalo conocido. |
+| **RNF5** | Calidad del código | El código debe ser legible, modular, documentado y mantener responsabilidades separadas. | Revisión del código, sus interfaces, nombres, documentación y correspondencia con RF1–RF3. |
 
-El sistema debe operar de forma continua durante al menos 10 minutos sin reinicios ni bloqueos. La estabilidad se verificará en pruebas de funcionamiento ininterrumpido, con monitoreo del comportamiento del sistema y ausencia de reseteos del microcontrolador o de la secuencia de lectura y visualización.
+## 1.3 Trazabilidad de los requerimientos
 
-### 1.2.2 RNF2. Exactitud de medición
+La siguiente matriz permite seguir cada requerimiento desde su definición hasta el diseño, la implementación y la prueba prevista.
 
-La exactitud de medición del sistema se define como un error máximo de ±3 cm respecto a una cinta métrica, dentro del rango de trabajo declarado de 2 cm a 200 cm. La medición se realizará en condiciones de ensayo controladas, comparando la distancia calculada por `SensorUltrasonico` con la referencia física aplicada mediante una cinta métrica.
-
-### 1.2.3 RNF3. Tiempo de respuesta
-
-El LED debe reflejar el cambio de rango en menos de 1 segundo desde que la distancia observada entra en un nuevo intervalo. El tiempo de respuesta se mide entre la lectura nueva, la actualización del rango por el clasificador y la activación del LED correspondiente por `IndicadorLeds`.
-
-### 1.2.4 RNF4. Frecuencia de muestreo
-
-El sistema debe realizar al menos 2 lecturas de distancia por segundo. Esta frecuencia es la base para mantener una respuesta visual estable y consistente en el indicador de proximidad, sin depender de una sola lectura aislada.
-
-### 1.2.5 RNF5. Calidad del código
-
-El código debe ser legible, modular, orientado a objetos y documentado, además de mantener convenciones de codificación consistentes. La estructura del firmware debe separar el acceso al sensor, la lógica de clasificación y la representación física de los LEDs. La documentación textual y los nombres de archivos, clases, estructuras y funciones deben reflejar el dominio del problema y facilitar el mantenimiento.
-
-## 1.3 Tabla de trazabilidad de requerimientos
-
-| Identificador | Requerimiento | Módulo principal responsable | Prueba de verificación |
-|---|---|---|---|
-| RF1 | Medición de distancia entre sensor y objeto | `SensorUltrasonico` y `main.cpp` | `PR-SENSOR-001` |
-| RF2 | Interpretación y clasificación en rangos contiguos y sin solapamiento | `ClasificadorDistancia` y `main.cpp` | `PR-CLASIFICACION-001` |
-| RF3 | Activación de actuadores según rango detectado | `IndicadorLeds` y `main.cpp` | `PR-INDICADOR-001` |
-| RNF1 | Estabilidad operativa durante al menos 10 minutos | `main.cpp`, `SensorUltrasonico`, `ClasificadorDistancia`, `IndicadorLeds` | `PR-ESTABILIDAD-001` |
-| RNF2 | Exactitud de medición de ±3 cm en rango de 2 a 200 cm | `SensorUltrasonico` y `main.cpp` | `PR-EXACTITUD-001` |
-| RNF3 | Tiempo de respuesta de cambio de LED menor a 1 segundo | `ClasificadorDistancia`, `IndicadorLeds` y `main.cpp` | `PR-RESPUESTA-001` |
-| RNF4 | Frecuencia de muestreo mínima de 2 lecturas por segundo | `SensorUltrasonico` y `main.cpp` | `PR-MUESTREO-001` |
-| RNF5 | Calidad del código: legible, modular, OO, documentado y consistente | `SensorUltrasonico`, `ClasificadorDistancia`, `IndicadorLeds`, `main.cpp` | `PR-CALIDAD-CODIGO-001` |
+| Requisito | Elemento de diseño | Evidencia de implementación | Verificación prevista |
+| --- | --- | --- | --- |
+| **RF1** | Módulo de adquisición y estructura de lectura | <code>SensorUltrasonico::medirDistanciaCm()</code> y <code>LecturaDistancia</code> | <code>PR-SENSOR-001</code> |
+| **RF2** | Módulo de clasificación y límites configurables | <code>clasificarDistancia()</code>, <code>RangoDistancia</code> y <code>Config.h</code> | <code>PR-CLASIFICACION-001</code> |
+| **RF3** | Conversión de rango y módulo actuador | <code>convertirAEstado()</code>, <code>IndicadorLeds::mostrar()</code> y <code>main.cpp</code> | <code>PR-INDICADOR-001</code> |
+| **RNF1** | Timeout del sensor y ciclo de control acotado | <code>_timeoutUs</code>, <code>pulseIn()</code> y <code>loop()</code> | <code>PR-ESTABILIDAD-001</code> |
+| **RNF2** | Conversión del tiempo de eco y validación física | <code>VELOCIDAD_SONIDO_CM_US</code> y límites de 2–400 cm del sensor | <code>PR-EXACTITUD-001</code> |
+| **RNF3** | Actualización periódica del indicador | Secuencia medir → clasificar → mostrar y espera de 100 ms | <code>PR-RESPUESTA-001</code> |
+| **RNF4** | Ciclo periódico de adquisición | <code>loop()</code>, timeout máximo de 30 000 µs y <code>delay(100)</code> | <code>PR-MUESTREO-001</code> |
+| **RNF5** | Arquitectura modular con interfaces limitadas | Clases <code>SensorUltrasonico</code> e <code>IndicadorLeds</code>, función de clasificación y dato compartido | <code>PR-CALIDAD-CODIGO-001</code> |
 
 # 2. Análisis y Diseño
 
-Diagramas basados en el flujo y la implementación real del proyecto:
+Esta sección transforma los requerimientos anteriores en una solución concreta. La arquitectura presenta los componentes y sus dependencias; el circuito especifica las conexiones físicas; el diagrama estructural muestra la organización del código; y los diagramas de comportamiento describen el orden de ejecución.
 
-`ESP32 → sensor ultrasónico → medición de distancia → validación → clasificación de distancia → conversión a estado → LEDs`
+## 2.1 Diagrama de arquitectura del sistema
 
-Componentes de hardware:
+El ESP32 funciona como unidad central. <code>main.cpp</code> coordina los módulos: solicita una medición al sensor, envía la lectura al clasificador y entrega al indicador el estado visual resultante. Las flechas continuas representan llamadas o datos; la flecha discontinua representa configuración.
 
-- ESP32
-- HC-SR04 — TRIG: GPIO25, ECHO: GPIO26 (con divisor de tensión)
-- LED rojo: GPIO27, LED amarillo: GPIO32, LED verde: GPIO33
-- Resistencias de 220 ohm para cada LED
-
-Módulos de software: `Config.h`, `LecturaDistancia`, `SensorUltrasonico`, `ClasificadorDistancia`, `IndicadorLeds`, `main.cpp`.
-
-## 2.1 Diagrama de arquitectura
-
-Muestra 3 zonas: hardware de entrada, el ESP32 con sus módulos de software, y hardware de salida. `Config.h` alimenta con constantes a `SensorUltrasonico` y `ClasificadorDistancia`; el resto de flechas sigue el flujo real de datos: HC-SR04 → SensorUltrasonico → LecturaDistancia → ClasificadorDistancia → main.cpp (que hace la conversión a estado) → IndicadorLeds → LEDs.
-
-```mermaid
-flowchart TB
-    subgraph EXT_IN["Hardware de entrada"]
-        HCSR04["HC-SR04<br/>(sensor ultrasonico)"]
-    end
-
-    subgraph ESP32["ESP32 (microcontrolador)"]
-        CONFIG["Config.h<br/>(umbrales y pines)"]
-        SENSOR["SensorUltrasonico"]
-        LECTURA["LecturaDistancia<br/>(distanciaCm, valida)"]
-        CLASIF["ClasificadorDistancia<br/>(clasificarDistancia)"]
-        MAIN["main.cpp<br/>(loop + convertirAEstado)"]
-        LEDSMOD["IndicadorLeds"]
-    end
-
-    subgraph EXT_OUT["Hardware de salida"]
-        LEDR["LED rojo (GPIO27)"]
-        LEDA["LED amarillo (GPIO32)"]
-        LEDV["LED verde (GPIO33)"]
-    end
-
-    HCSR04 -- "TRIG / ECHO" --> SENSOR
-    SENSOR --> LECTURA
-    LECTURA --> CLASIF
-    CLASIF --> MAIN
-    MAIN --> LEDSMOD
-    LEDSMOD --> LEDR
-    LEDSMOD --> LEDA
-    LEDSMOD --> LEDV
-
-    CONFIG -.-> SENSOR
-    CONFIG -.-> CLASIF
-```
-
-## 2.2 Diagrama de circuito (conexiones y pines)
-
-No es un esquemático electrónico formal (para eso se usa Fritzing/KiCad), sino un diagrama de conexiones simplificado, suficiente para el informe.
-
-```mermaid
+~~~mermaid
 flowchart LR
-    subgraph ESP32PINS["ESP32"]
+    subgraph ENTRADA["Hardware de entrada"]
+        HC["HC-SR04"]
+    end
+
+    subgraph MCU["ESP32"]
+        MAIN["main.cpp<br/>coordinación"]
+        SENSOR["SensorUltrasonico<br/>adquisición y validación"]
+        LECTURA["LecturaDistancia<br/>distanciaCm + valida"]
+        CLASIF["ClasificadorDistancia<br/>rango lógico"]
+        CONFIG["Config.h<br/>umbrales e histéresis"]
+        INDICADOR["IndicadorLeds<br/>salidas digitales"]
+    end
+
+    subgraph SALIDA["Hardware de salida"]
+        LEDR["LED rojo"]
+        LEDA["LED amarillo"]
+        LEDV["LED verde"]
+    end
+
+    MAIN -->|"solicita medición"| SENSOR
+    SENSOR -->|"pulso TRIG"| HC
+    HC -->|"pulso ECHO"| SENSOR
+    SENSOR -->|"produce"| LECTURA
+    LECTURA -->|"regresa a"| MAIN
+    MAIN -->|"lectura + rango anterior"| CLASIF
+    CONFIG -.->|"límites"| CLASIF
+    CLASIF -->|"RangoDistancia"| MAIN
+    MAIN -->|"EstadoIndicador"| INDICADOR
+    INDICADOR --> LEDR
+    INDICADOR --> LEDA
+    INDICADOR --> LEDV
+~~~
+
+### 2.1.1 Responsabilidades y datos intercambiados
+
+| Componente | Entrada | Salida | Responsabilidad |
+| --- | --- | --- | --- |
+| HC-SR04 | Pulso de disparo | Pulso de eco | Detectar el recorrido del sonido. |
+| <code>SensorUltrasonico</code> | Duración del eco | <code>LecturaDistancia</code> | Calcular centímetros y marcar la validez física de la lectura. |
+| <code>ClasificadorDistancia</code> | Lectura actual y rango anterior | <code>RangoDistancia</code> | Aplicar límites, rango de trabajo e histéresis. |
+| <code>main.cpp</code> | Lectura y rango obtenido | <code>EstadoIndicador</code> | Coordinar el ciclo y convertir el rango lógico en un estado visual. |
+| <code>IndicadorLeds</code> | <code>EstadoIndicador</code> | Niveles eléctricos en tres GPIO | Apagar los LEDs no seleccionados y encender el correspondiente. |
+
+## 2.2 Diagrama de circuito
+
+El circuito utiliza alimentación y tierra comunes. Cada LED incorpora una resistencia de 330 Ω para limitar la corriente. La señal ECHO del HC-SR04 no se conecta directamente al GPIO26: pasa por un divisor de tensión que reduce su nivel antes de ingresar al ESP32.
+
+~~~mermaid
+flowchart LR
+    subgraph ESP["ESP32"]
+        V5["5V"]
+        GND["GND"]
         P25["GPIO25"]
         P26["GPIO26"]
         P27["GPIO27"]
         P32["GPIO32"]
         P33["GPIO33"]
-        V5["5V"]
-        GND["GND"]
     end
 
-    HVCC["HC-SR04 VCC"]
-    HTRIG["HC-SR04 TRIG"]
-    HECHO["HC-SR04 ECHO"]
-    HGND["HC-SR04 GND"]
-    DIV["Divisor de tension"]
+    subgraph US["HC-SR04"]
+        VCC["VCC"]
+        TRIG["TRIG"]
+        ECHO["ECHO"]
+        SGND["GND"]
+    end
 
-    LEDR["LED rojo"]
-    LEDA["LED amarillo"]
-    LEDV["LED verde"]
-    R1["Resistencia 220 ohm"]
-    R2["Resistencia 220 ohm"]
-    R3["Resistencia 220 ohm"]
+    RUP["Resistencia superior<br/>del divisor"]
+    NODE["Nivel reducido<br/>aprox. 3.3 V"]
+    RDOWN["Resistencia inferior<br/>del divisor"]
 
-    V5 --> HVCC
-    P25 --> HTRIG
-    HECHO --> DIV --> P26
-    HGND --> GND
+    RR["330 Ω"]
+    RA["330 Ω"]
+    RV["330 Ω"]
+    LR["LED rojo"]
+    LA["LED amarillo"]
+    LV["LED verde"]
 
-    P27 --> R1 --> LEDR --> GND
-    P32 --> R2 --> LEDA --> GND
-    P33 --> R3 --> LEDV --> GND
-```
+    V5 --> VCC
+    GND --- SGND
+    P25 --> TRIG
+    ECHO --> RUP --> NODE --> P26
+    NODE --> RDOWN --> GND
+
+    P27 --> RR --> LR --> GND
+    P32 --> RA --> LA --> GND
+    P33 --> RV --> LV --> GND
+~~~
+
+| Elemento | Conexión |
+| --- | --- |
+| HC-SR04 VCC | Pin de 5 V del ESP32 |
+| HC-SR04 GND | GND común |
+| HC-SR04 TRIG | GPIO25 |
+| HC-SR04 ECHO | Divisor de tensión y luego GPIO26 |
+| LED rojo | GPIO27 → resistencia de 330 Ω → ánodo; cátodo → GND |
+| LED amarillo | GPIO32 → resistencia de 330 Ω → ánodo; cátodo → GND |
+| LED verde | GPIO33 → resistencia de 330 Ω → ánodo; cátodo → GND |
 
 ## 2.3 Diagrama estructural
 
-Solo se necesita un diagrama de clases: el de arquitectura (2.1) ya cubre la vista de módulos/componentes, así que no se agrega un diagrama de componentes aparte.
+El diagrama representa las clases, estructuras, enumeraciones, funciones y dependencias existentes en el código. <code>main.cpp</code> posee las instancias del sensor y del indicador; el sensor crea una lectura; el clasificador utiliza esa lectura y las constantes de configuración; finalmente, el indicador recibe el estado visual.
 
-- `LecturaDistancia` (struct): `distanciaCm: float`, `valida: bool`
-- `SensorUltrasonico` (clase): atributos privados de pines/timeout, métodos `begin()` y `medirDistanciaCm(): LecturaDistancia`
-- `RangoDistancia` (enum): CERCANO, MEDIO, LEJANO, ERROR
-- `ClasificadorDistancia` (función libre, no clase): `clasificarDistancia(lectura, rangoAnterior): RangoDistancia`
-- `EstadoIndicador` (enum): Rojo, Amarillo, Verde, Error
-- `IndicadorLeds` (clase): pines privados, métodos `begin()`, `mostrar(estado)`, `apagarTodos()` privado
-- `Config` (constantes, no clase): umbrales y rango válido
-
-```mermaid
+~~~mermaid
 classDiagram
-    class Config {
-        <<constantes>>
-        +UMBRAL_CERCA_MEDIO_CM
-        +UMBRAL_MEDIO_LEJOS_CM
-        +MARGEN_HISTERESIS_CM
-        +DISTANCIA_MINIMA_VALIDA_CM
-        +DISTANCIA_MAXIMA_VALIDA_CM
+    class Main {
+        <<archivo>>
+        +setup() void
+        +loop() void
+        +convertirAEstado(rango) EstadoIndicador
+        -rangoAnterior : RangoDistancia
+    }
+
+    class SensorUltrasonico {
+        -_pinTrig : uint8_t
+        -_pinEcho : uint8_t
+        -_timeoutUs : unsigned long
+        -VELOCIDAD_SONIDO_CM_US : float
+        -DISTANCIA_MIN_CM : float
+        -DISTANCIA_MAX_CM : float
+        +SensorUltrasonico(pinTrig, pinEcho, timeoutUs)
+        +begin() void
+        +medirDistanciaCm() LecturaDistancia
     }
 
     class LecturaDistancia {
         +distanciaCm : float
         +valida : bool
+    }
+
+    class ClasificadorDistancia {
+        <<módulo>>
+        +clasificarDistancia(lectura, rangoAnterior) RangoDistancia
+    }
+
+    class Config {
+        <<constantes>>
+        +UMBRAL_CERCA_MEDIO_CM : float
+        +UMBRAL_MEDIO_LEJOS_CM : float
+        +MARGEN_HISTERESIS_CM : float
+        +DISTANCIA_MINIMA_VALIDA_CM : float
+        +DISTANCIA_MAXIMA_VALIDA_CM : float
     }
 
     class RangoDistancia {
@@ -198,6 +222,15 @@ classDiagram
         ERROR
     }
 
+    class IndicadorLeds {
+        -PIN_ROJO : int
+        -PIN_AMARILLO : int
+        -PIN_VERDE : int
+        -apagarTodos() void
+        +begin() void
+        +mostrar(estado) void
+    }
+
     class EstadoIndicador {
         <<enumeration>>
         Rojo
@@ -206,229 +239,180 @@ classDiagram
         Error
     }
 
-    class SensorUltrasonico {
-        -pinTrig : uint8_t
-        -pinEcho : uint8_t
-        -timeoutUs : unsigned long
-        +begin() void
-        +medirDistanciaCm() LecturaDistancia
-    }
-
-    class ClasificadorDistancia {
-        <<funcion libre>>
-        +clasificarDistancia(lectura, rangoAnterior) RangoDistancia
-    }
-
-    class IndicadorLeds {
-        -PIN_ROJO : int
-        -PIN_AMARILLO : int
-        -PIN_VERDE : int
-        +begin() void
-        +mostrar(estado) void
-        -apagarTodos() void
-    }
-
+    Main *-- SensorUltrasonico : posee
+    Main *-- IndicadorLeds : posee
+    Main ..> LecturaDistancia : recibe
+    Main ..> ClasificadorDistancia : llama
+    Main ..> RangoDistancia : conserva
+    Main ..> EstadoIndicador : produce
     SensorUltrasonico ..> LecturaDistancia : crea
-    ClasificadorDistancia ..> LecturaDistancia : usa
+    ClasificadorDistancia ..> LecturaDistancia : procesa
+    ClasificadorDistancia ..> Config : consulta
     ClasificadorDistancia ..> RangoDistancia : devuelve
-    IndicadorLeds ..> EstadoIndicador : usa
-    SensorUltrasonico ..> Config : usa
-    ClasificadorDistancia ..> Config : usa
-```
+    IndicadorLeds ..> EstadoIndicador : recibe
+~~~
 
 ## 2.4 Diagramas de comportamiento
 
-Se usan 2: uno para el flujo de control (actividad) y otro para la interacción entre módulos (secuencia). No se agrega diagrama de estados aparte porque las transiciones de rango (con histéresis) ya se explican como parte de la actividad.
+Los dos diagramas siguientes muestran aspectos diferentes. El diagrama de actividad explica las decisiones del algoritmo, mientras que el diagrama de secuencia muestra qué módulo llama a cuál durante un ciclo.
 
-### 2.4.1 Diagrama de actividad (ciclo del `loop`)
+### 2.4.1 Diagrama de actividad
 
-```mermaid
+~~~mermaid
 flowchart TD
-    START(["Inicio del ciclo (loop)"])
-    MEDIR["sensor.medirDistanciaCm()"]
-    CLASIF{"clasificarDistancia(lectura, rangoAnterior)"}
-    ROJO["convertirAEstado -> Rojo"]
-    AMARILLO["convertirAEstado -> Amarillo"]
-    VERDE["convertirAEstado -> Verde"]
-    ERRORST["convertirAEstado -> Error"]
-    MOSTRAR["indicador.mostrar(estado)"]
-    ESPERA["delay(100 ms)"]
+    START(["Encendido o reinicio"])
+    SETUP["setup(): inicializar sensor e indicador"]
+    MEDIR["Solicitar LecturaDistancia"]
+    CLASIFICAR["Clasificar usando lectura<br/>y rango anterior"]
+    DECISION{"Rango obtenido"}
+    CR["Convertir a Rojo"]
+    CA["Convertir a Amarillo"]
+    CV["Convertir a Verde"]
+    CE["Convertir a Error"]
+    MOSTRAR["Apagar todos y encender<br/>solo el LED correspondiente"]
+    ESPERAR["Esperar 100 ms"]
 
-    START --> MEDIR --> CLASIF
-    CLASIF -- CERCANO --> ROJO
-    CLASIF -- MEDIO --> AMARILLO
-    CLASIF -- LEJANO --> VERDE
-    CLASIF -- "ERROR (invalida o fuera de rango)" --> ERRORST
-    ROJO --> MOSTRAR
-    AMARILLO --> MOSTRAR
-    VERDE --> MOSTRAR
-    ERRORST --> MOSTRAR
-    MOSTRAR --> ESPERA --> START
-```
+    START --> SETUP --> MEDIR --> CLASIFICAR --> DECISION
+    DECISION -->|CERCANO| CR
+    DECISION -->|MEDIO| CA
+    DECISION -->|LEJANO| CV
+    DECISION -->|"ERROR"| CE
+    CR --> MOSTRAR
+    CA --> MOSTRAR
+    CV --> MOSTRAR
+    CE --> MOSTRAR
+    MOSTRAR --> ESPERAR --> MEDIR
+~~~
 
-*Nota: `clasificarDistancia` aplica internamente un margen de histéresis (2 cm) usando el rango anterior, para evitar parpadeo en los límites de 20/40 cm — por eso el diagrama lo trata como una sola decisión en vez de desglosar cada comparación.*
+El estado <code>ERROR</code> incluye la ausencia de eco, una lectura físicamente inválida o una distancia fuera del rango de trabajo de 2–200 cm. En ese estado, la operación “mostrar” apaga los tres LEDs.
 
-### 2.4.2 Diagrama de secuencia (un ciclo de medición)
+### 2.4.2 Diagrama de secuencia
 
-```mermaid
+~~~mermaid
 sequenceDiagram
+    participant Arduino
     participant Main as main.cpp
     participant Sensor as SensorUltrasonico
-    participant Clasif as ClasificadorDistancia
-    participant Leds as IndicadorLeds
+    participant HC as HC-SR04
+    participant Clasificador as ClasificadorDistancia
+    participant Indicador as IndicadorLeds
 
+    Arduino->>Main: ejecutar loop()
     Main->>Sensor: medirDistanciaCm()
-    Sensor-->>Main: LecturaDistancia(distanciaCm, valida)
-    Main->>Clasif: clasificarDistancia(lectura, rangoAnterior)
-    Clasif-->>Main: RangoDistancia
+    Sensor->>HC: pulso TRIG de 10 µs
+    HC-->>Sensor: pulso ECHO
+    Sensor-->>Main: LecturaDistancia
+    Main->>Clasificador: clasificarDistancia(lectura, rangoAnterior)
+    Clasificador-->>Main: RangoDistancia
     Main->>Main: convertirAEstado(rango)
-    Main->>Leds: mostrar(estado)
-    Leds-->>Main: LEDs actualizados
-```
+    Main->>Indicador: mostrar(estado)
+    Indicador-->>Main: salidas actualizadas
+    Main-->>Arduino: fin del ciclo
+~~~
 
-## 3. Desarrollo e Implementación
+## 2.5 Decisiones principales de diseño
 
-### 3.1 Enfoque de implementación
+- **Separación de responsabilidades:** la adquisición, la decisión y la actuación se encuentran en módulos diferentes.
+- **Dato compartido único:** <code>LecturaDistancia</code> evita duplicar estructuras incompatibles entre sensor y clasificador.
+- **Configuración centralizada:** los umbrales del comportamiento se modifican desde <code>Config.h</code>.
+- **Histéresis:** el clasificador utiliza el rango anterior para reducir cambios inestables cerca de 20 y 40 cm.
+- **Fallo seguro:** una lectura inválida conduce a <code>ERROR</code> y mantiene los tres LEDs apagados.
+- **Coordinador simple:** <code>main.cpp</code> conecta los módulos sin implementar directamente la medición ultrasónica ni la escritura individual de los GPIO de los LEDs.
 
-El prototipo fue desarrollado en C++ utilizando el framework Arduino y PlatformIO para una placa ESP32. La implementación integra un sensor ultrasónico HC-SR04 y tres LEDs que representan visualmente la distancia detectada. El programa mide la distancia, valida la lectura, la clasifica en uno de tres rangos y activa un único LED de acuerdo con el resultado.
+# 3. Desarrollo e Implementación
 
-Para mantener el código organizado, cada parte del sistema posee una responsabilidad concreta:
+## 3.1 Entorno de desarrollo
 
-- `SensorUltrasonico` se comunica con el HC-SR04 y transforma la duración del eco en una distancia expresada en centímetros.
-- `ClasificadorDistancia` valida la distancia de trabajo y determina si el objeto se encuentra en el rango cercano, medio o lejano.
-- `IndicadorLeds` controla las salidas físicas y garantiza que solamente permanezca encendido el LED correspondiente.
-- `main.cpp` coordina los tres módulos sin contener los detalles internos de medición ni de control eléctrico.
-- `LecturaDistancia` constituye el dato compartido entre el sensor y el clasificador.
-- `Config.h` concentra los límites de clasificación para que puedan modificarse sin reescribir el algoritmo.
+El firmware fue desarrollado en C++ con el framework Arduino y organizado como un proyecto PlatformIO.
 
-Esta distribución aplica una combinación intencional de programación orientada a objetos y funciones independientes. Las partes que representan dispositivos físicos se implementaron como clases, debido a que conservan información propia como pines y parámetros de funcionamiento. La clasificación, al no necesitar controlar hardware, se implementó como una función separada y reutilizable.
-
-El flujo implementado es el siguiente:
-
-```mermaid
-flowchart LR
-    A["HC-SR04<br/>detecta un objeto"] --> B["SensorUltrasonico<br/>mide y valida"]
-    B -->|"LecturaDistancia"| C["ClasificadorDistancia<br/>determina el rango"]
-    D["Config.h<br/>límites e histéresis"] --> C
-    C -->|"RangoDistancia"| E["main.cpp<br/>convierte rango en color"]
-    E -->|"EstadoIndicador"| F["IndicadorLeds<br/>controla las salidas"]
-    F --> G["LED rojo,<br/>amarillo o verde"]
-```
-
-### 3.2 Entorno y herramientas
-
-| Elemento | Selección utilizada | Función dentro del proyecto |
+| Elemento | Selección | Uso |
 | --- | --- | --- |
-| Microcontrolador | ESP32 Dev Module | Ejecuta el algoritmo y controla las entradas y salidas. |
-| Framework | Arduino | Proporciona las funciones de control de pines, temporización y lectura del pulso. |
-| Lenguaje | C++ | Permite organizar el sistema mediante clases, estructuras, enumeraciones y funciones. |
-| Entorno de construcción | PlatformIO | Gestiona la plataforma ESP32 y la generación del firmware. |
-| Sensor | HC-SR04 | Obtiene la distancia entre el prototipo y un objeto. |
-| Actuadores | Tres LEDs | Representan los rangos cercano, medio y lejano. |
+| Microcontrolador | ESP32 Dev Module | Procesamiento y control de entradas y salidas. |
+| Framework | Arduino | Funciones de GPIO, temporización y medición de pulsos. |
+| Lenguaje | C++ | Clases, estructuras, enumeraciones y funciones del firmware. |
+| Herramienta de construcción | PlatformIO | Configuración de la plataforma y generación del firmware. |
 
-La plataforma utilizada está declarada en [`platformio.ini`](../platformio.ini):
+La configuración está declarada en [<code>platformio.ini</code>](../platformio.ini):
 
-```ini
+~~~ini
 [env:esp32dev]
 platform = espressif32
 board = esp32dev
 framework = arduino
-```
+~~~
 
-### 3.3 Organización del código fuente
+## 3.2 Organización del código fuente
 
-El código se encuentra dividido en archivos de interfaz (`.h`) e implementación (`.cpp`). Los encabezados indican qué datos y operaciones ofrece cada módulo, mientras que los archivos `.cpp` contienen su funcionamiento interno.
+Los encabezados <code>.h</code> definen las interfaces y los tipos compartidos. Los archivos <code>.cpp</code> contienen las operaciones que realizan la medición, la clasificación, el control de los actuadores y la coordinación.
 
 | Archivo | Responsabilidad |
 | --- | --- |
-| [`src/main.cpp`](../src/main.cpp) | Inicializa los módulos y coordina el ciclo completo de medición, clasificación y señalización. |
-| [`src/LecturaDistancia.h`](../src/LecturaDistancia.h) | Define el formato común utilizado para transferir una lectura. |
-| [`src/SensorUltrasonico.h`](../src/SensorUltrasonico.h) | Declara la clase del sensor, sus operaciones públicas y sus parámetros internos. |
-| [`src/SensorUltrasonico.cpp`](../src/SensorUltrasonico.cpp) | Genera el pulso de disparo, mide el eco, calcula la distancia y determina si la lectura es válida. |
-| [`src/ClasificadorDistancia.h`](../src/ClasificadorDistancia.h) | Declara los posibles rangos y la función de clasificación. |
-| [`src/ClasificadorDistancia.cpp`](../src/ClasificadorDistancia.cpp) | Implementa los límites, la validación del rango de trabajo y la histéresis. |
-| [`src/Config.h`](../src/Config.h) | Centraliza los umbrales y límites configurables del clasificador. |
-| [`src/IndicadorLeds.h`](../src/IndicadorLeds.h) | Declara los estados visuales, los pines y las operaciones del indicador. |
-| [`src/IndicadorLeds.cpp`](../src/IndicadorLeds.cpp) | Configura los GPIO y enciende el LED correspondiente al estado recibido. |
+| [<code>src/main.cpp</code>](../src/main.cpp) | Inicialización y coordinación del ciclo completo. |
+| [<code>src/LecturaDistancia.h</code>](../src/LecturaDistancia.h) | Formato común de una medición. |
+| [<code>src/SensorUltrasonico.h</code>](../src/SensorUltrasonico.h) | Interfaz, pines y parámetros privados del sensor. |
+| [<code>src/SensorUltrasonico.cpp</code>](../src/SensorUltrasonico.cpp) | Disparo, recepción del eco, cálculo y validación física. |
+| [<code>src/ClasificadorDistancia.h</code>](../src/ClasificadorDistancia.h) | Rangos disponibles e interfaz de clasificación. |
+| [<code>src/ClasificadorDistancia.cpp</code>](../src/ClasificadorDistancia.cpp) | Validación del rango de trabajo, clasificación e histéresis. |
+| [<code>src/Config.h</code>](../src/Config.h) | Umbrales y límites configurables del clasificador. |
+| [<code>src/IndicadorLeds.h</code>](../src/IndicadorLeds.h) | Estados visuales, pines e interfaz del indicador. |
+| [<code>src/IndicadorLeds.cpp</code>](../src/IndicadorLeds.cpp) | Configuración de salidas y activación exclusiva de LEDs. |
 
-La dependencia entre los archivos está controlada mediante inclusiones explícitas. Por ejemplo, tanto el sensor como el clasificador incluyen `LecturaDistancia.h`, por lo que ambos intercambian exactamente el mismo tipo de dato. De esta manera se evita duplicar estructuras incompatibles o convertir manualmente los nombres de sus campos.
+## 3.3 Adquisición y representación de la lectura
 
-### 3.4 Dato compartido: `LecturaDistancia`
+### 3.3.1 Estructura compartida
 
-El sensor no devuelve únicamente un número. Una distancia numérica por sí sola no permite distinguir una medición real de un error producido por ausencia de eco. Para solucionar este problema se definió la estructura `LecturaDistancia`:
+La medición se representa con una estructura que conserva tanto el valor como su confiabilidad:
 
-```cpp
+~~~cpp
 struct LecturaDistancia {
     float distanciaCm;
     bool valida;
 };
-```
+~~~
 
-Sus campos tienen el siguiente propósito:
+<code>distanciaCm</code> guarda el resultado en centímetros y <code>valida</code> indica si puede utilizarse. Esta estructura es producida por el sensor y recibida sin conversiones por el clasificador.
 
-| Campo | Significado |
-| --- | --- |
-| `distanciaCm` | Distancia calculada en centímetros. |
-| `valida` | Indica si la medición puede utilizarse. Es `false` cuando no se recibe eco o la distancia está fuera del rango físico aceptado. |
+### 3.3.2 Clase <code>SensorUltrasonico</code>
 
-Esta estructura establece un contrato común entre módulos: `SensorUltrasonico` la produce, `main.cpp` la recibe y `ClasificadorDistancia` la procesa. Con ello, la información de validez acompaña siempre al valor medido.
+El objeto se crea en <code>main.cpp</code> sin argumentos, por lo que adopta los valores predeterminados definidos en su constructor:
 
-### 3.5 Implementación del sensor ultrasónico
-
-#### 3.5.1 Configuración del dispositivo
-
-La clase `SensorUltrasonico` conserva como información privada el pin de disparo, el pin de eco y el tiempo máximo de espera. Su constructor permite reemplazar esos valores, pero utiliza por defecto la configuración del prototipo:
-
-```cpp
+~~~cpp
 SensorUltrasonico(
     uint8_t pinTrig = 25,
     uint8_t pinEcho = 26,
     unsigned long timeoutUs = 30000
 );
-```
+~~~
 
-Por tanto, la instancia declarada en `main.cpp` utiliza:
+El método <code>begin()</code> prepara los pines una sola vez:
 
-| Parámetro | Valor | Finalidad |
-| --- | ---: | --- |
-| TRIG | GPIO25 | Envía el pulso que inicia la medición. |
-| ECHO | GPIO26 | Recibe el pulso cuyo tiempo representa el recorrido del sonido. |
-| Tiempo máximo | 30 000 µs | Evita una espera indefinida cuando no se recibe eco. |
-
-El método `begin()` se ejecuta una vez durante el arranque. Configura TRIG como salida, ECHO como entrada y deja TRIG inicialmente en nivel bajo:
-
-```cpp
+~~~cpp
 void SensorUltrasonico::begin() {
     pinMode(_pinTrig, OUTPUT);
     pinMode(_pinEcho, INPUT);
     digitalWrite(_pinTrig, LOW);
 }
-```
+~~~
 
-#### 3.5.2 Proceso de medición
+El método <code>medirDistanciaCm()</code> inicia cada lectura con <code>distanciaCm = 0.0</code> y <code>valida = false</code>. Después:
 
-El método `medirDistanciaCm()` realiza la medición mediante los siguientes pasos:
+1. Mantiene TRIG en nivel bajo durante 2 µs.
+2. Envía por TRIG un pulso alto de 10 µs.
+3. Mide mediante <code>pulseIn()</code> la duración del pulso ECHO.
+4. Si el tiempo recibido es cero, devuelve la lectura inválida.
+5. Calcula la distancia utilizando la velocidad aproximada del sonido.
+6. Acepta físicamente valores de 2 a 400 cm.
 
-1. Crea una lectura inicial con distancia `0.0` y validez `false`.
-2. Mantiene TRIG en nivel bajo durante 2 µs para producir un inicio limpio.
-3. Coloca TRIG en nivel alto durante 10 µs para solicitar una medición.
-4. Utiliza `pulseIn()` para medir cuánto tiempo permanece activo el pulso recibido por ECHO.
-5. Si no llega un eco antes del tiempo máximo, devuelve la lectura inválida inicial.
-6. Si llega el eco, convierte su duración en una distancia.
-7. Acepta el resultado físico únicamente cuando está entre 2 y 400 cm.
+La conversión utilizada es:
 
-La conversión implementada es:
-
-```cpp
+~~~cpp
 float distancia =
     (duracionUs * VELOCIDAD_SONIDO_CM_US) / 2.0f;
-```
+~~~
 
-La constante `VELOCIDAD_SONIDO_CM_US` tiene el valor `0.0343`, correspondiente a la velocidad aproximada del sonido expresada en centímetros por microsegundo. El resultado se divide entre dos porque el tiempo medido incluye el recorrido de ida hacia el objeto y el recorrido de vuelta hacia el sensor.
+<code>VELOCIDAD_SONIDO_CM_US</code> vale <code>0.0343</code>. La división entre dos corresponde al viaje de ida y vuelta del sonido. La lectura se marca como válida únicamente después de superar todas las comprobaciones:
 
-La validación física se realiza antes de informar que el resultado es confiable:
-
-```cpp
+~~~cpp
 if (duracionUs == 0) {
     return lectura;
 }
@@ -440,122 +424,104 @@ if (distancia < DISTANCIA_MIN_CM ||
 
 lectura.distanciaCm = distancia;
 lectura.valida = true;
-```
+return lectura;
+~~~
 
-Así se satisface el requerimiento **RF1**, ya que el sistema obtiene una distancia real y también identifica explícitamente los casos en los que no fue posible medirla de forma confiable.
+Esta implementación proporciona la evidencia de código para **RF1**.
 
-### 3.6 Implementación del clasificador de distancia
+## 3.4 Clasificación de la distancia
 
-El clasificador recibe la lectura producida por el sensor y devuelve uno de los valores definidos por `RangoDistancia`:
+La interfaz pública define cuatro resultados posibles y una función que recibe la lectura actual junto con el rango anterior:
 
-```cpp
+~~~cpp
 enum class RangoDistancia {
     CERCANO,
     MEDIO,
     LEJANO,
     ERROR
 };
-```
 
-La función pública tiene dos entradas:
-
-```cpp
 RangoDistancia clasificarDistancia(
     const LecturaDistancia& lectura,
     RangoDistancia rangoAnterior
 );
-```
+~~~
 
-- `lectura` contiene la distancia actual y su estado de validez.
-- `rangoAnterior` conserva el resultado del ciclo anterior para estabilizar los cambios cerca de los límites.
+Los valores configurables son:
 
-#### 3.6.1 Parámetros configurables
-
-Los valores de clasificación se encuentran centralizados en `Config.h`:
-
-```cpp
+~~~cpp
 constexpr float UMBRAL_CERCA_MEDIO_CM = 20.0f;
 constexpr float UMBRAL_MEDIO_LEJOS_CM = 40.0f;
 constexpr float MARGEN_HISTERESIS_CM = 2.0f;
 constexpr float DISTANCIA_MINIMA_VALIDA_CM = 2.0f;
 constexpr float DISTANCIA_MAXIMA_VALIDA_CM = 200.0f;
-```
+~~~
 
-El uso de `constexpr` permite tratar estos valores como constantes del programa e impide que sean modificados accidentalmente durante la ejecución. Además, su ubicación centralizada facilita ajustar el comportamiento sin alterar la función de clasificación.
+El clasificador aplica las comprobaciones en este orden:
 
-Cuando no existe un rango anterior confiable, la clasificación base es:
+1. Si <code>lectura.valida</code> es falsa, devuelve <code>ERROR</code>.
+2. Si la distancia queda fuera de 2–200 cm, devuelve <code>ERROR</code>.
+3. Si no existe un rango anterior válido, clasifica directamente con los límites de 20 y 40 cm.
+4. Si existe un rango anterior, aplica el margen de histéresis declarado en la sección 1.1.1.
 
-| Distancia recibida | Clasificación |
-| --- | --- |
-| Menor que 2 cm | `ERROR` |
-| Desde 2 cm hasta menos de 20 cm | `CERCANO` |
-| Desde 20 cm hasta menos de 40 cm | `MEDIO` |
-| Desde 40 cm hasta 200 cm | `LEJANO` |
-| Mayor que 200 cm | `ERROR` |
+La clasificación base está aislada en una función interna:
 
-Los intervalos válidos son contiguos y no presentan solapamientos. El valor exacto de 20 cm pertenece a `MEDIO`, mientras que 40 cm pertenece a `LEJANO`. Esto satisface el requerimiento **RF2** de dividir las mediciones en al menos tres rangos claramente definidos.
-
-#### 3.6.2 Validación y manejo de errores
-
-La función comprueba primero la validez indicada por el sensor:
-
-```cpp
-if (!lectura.valida) {
-    return RangoDistancia::ERROR;
+~~~cpp
+RangoDistancia clasificarPorUmbrales(float distanciaCm) {
+    if (distanciaCm < UMBRAL_CERCA_MEDIO_CM) {
+        return RangoDistancia::CERCANO;
+    }
+    if (distanciaCm < UMBRAL_MEDIO_LEJOS_CM) {
+        return RangoDistancia::MEDIO;
+    }
+    return RangoDistancia::LEJANO;
 }
-```
+~~~
 
-Luego aplica el rango de trabajo definido para la aplicación:
+La histéresis se implementa con una selección basada en <code>rangoAnterior</code>. Por ejemplo, cuando el estado previo es <code>MEDIO</code>:
 
-```cpp
-if (distancia < DISTANCIA_MINIMA_VALIDA_CM ||
-    distancia > DISTANCIA_MAXIMA_VALIDA_CM) {
-    return RangoDistancia::ERROR;
-}
-```
+~~~cpp
+case RangoDistancia::MEDIO:
+    if (distancia <
+        UMBRAL_CERCA_MEDIO_CM - MARGEN_HISTERESIS_CM) {
+        return RangoDistancia::CERCANO;
+    }
+    if (distancia >=
+        UMBRAL_MEDIO_LEJOS_CM + MARGEN_HISTERESIS_CM) {
+        return RangoDistancia::LEJANO;
+    }
+    return RangoDistancia::MEDIO;
+~~~
 
-El sensor admite físicamente valores de hasta 400 cm, mientras que el clasificador restringe el funcionamiento del prototipo a 200 cm. Esta separación es deliberada: el sensor determina si la lectura es físicamente posible y el clasificador decide si está dentro del rango útil definido para esta práctica.
+De esta manera, una pequeña variación alrededor de un límite no cambia inmediatamente el resultado, pero toda llamada sigue produciendo exactamente un rango. Esta implementación proporciona la evidencia de código para **RF2**.
 
-#### 3.6.3 Estabilización mediante histéresis
+## 3.5 Control de los LEDs
 
-Las mediciones ultrasónicas pueden variar ligeramente aunque el objeto permanezca quieto. Sin una estabilización, valores como 19.9 y 20.1 cm provocarían cambios repetidos entre los LEDs rojo y amarillo. Para evitarlo se utiliza un margen de 2 cm y el rango obtenido en el ciclo anterior.
+El indicador recibe uno de cuatro estados:
 
-| Rango anterior | Condición para cambiar | Comportamiento resultante |
-| --- | --- | --- |
-| `ERROR` | Primera lectura válida | Clasifica directamente con los límites de 20 y 40 cm. |
-| `CERCANO` | La distancia alcanza al menos 22 cm | Puede cambiar a `MEDIO` o directamente a `LEJANO`. |
-| `MEDIO` | Baja de 18 cm | Cambia a `CERCANO`. |
-| `MEDIO` | Alcanza al menos 42 cm | Cambia a `LEJANO`. |
-| `LEJANO` | Baja de 38 cm | Puede cambiar a `MEDIO` o directamente a `CERCANO`. |
-
-Por ejemplo, si el sistema se encuentra en `CERCANO`, una secuencia de 19, 21, 19 y 21 cm conserva el mismo rango. El cambio a `MEDIO` ocurre al alcanzar 22 cm. Esta decisión reduce oscilaciones visuales y contribuye a la estabilidad solicitada por los requerimientos no funcionales.
-
-### 3.7 Implementación del indicador de LEDs
-
-El indicador representa los resultados del clasificador mediante una enumeración orientada al actuador:
-
-```cpp
+~~~cpp
 enum class EstadoIndicador {
     Rojo,
     Amarillo,
     Verde,
     Error
 };
-```
+~~~
 
-La clase asigna los siguientes pines:
+Los pines GPIO27, GPIO32 y GPIO33 están encapsulados como constantes privadas de la clase. El método <code>begin()</code> configura las salidas y deja los tres LEDs apagados:
 
-| LED | GPIO | Estado asociado |
-| --- | ---: | --- |
-| Rojo | 27 | Objeto cercano. |
-| Amarillo | 32 | Objeto a distancia media. |
-| Verde | 33 | Objeto lejano dentro del rango de trabajo. |
+~~~cpp
+void IndicadorLeds::begin() {
+    pinMode(PIN_ROJO, OUTPUT);
+    pinMode(PIN_AMARILLO, OUTPUT);
+    pinMode(PIN_VERDE, OUTPUT);
+    apagarTodos();
+}
+~~~
 
-El método `begin()` configura los tres pines como salidas y llama a `apagarTodos()`. Con ello, el sistema inicia en un estado seguro y definido.
+Antes de encender un color, <code>mostrar()</code> llama a <code>apagarTodos()</code>. Esta secuencia garantiza que no permanezcan activos dos colores después de una transición:
 
-El método `mostrar()` apaga primero todos los LEDs y después enciende solamente el correspondiente:
-
-```cpp
+~~~cpp
 void IndicadorLeds::mostrar(EstadoIndicador estado) {
     apagarTodos();
 
@@ -573,102 +539,72 @@ void IndicadorLeds::mostrar(EstadoIndicador estado) {
             break;
     }
 }
-```
+~~~
 
-La llamada previa a `apagarTodos()` evita que queden dos colores encendidos al cambiar de rango. Cuando se recibe `Error`, no se activa ningún LED, por lo que una lectura inválida queda representada mediante los tres indicadores apagados.
+En <code>Error</code> no se ejecuta ningún encendido, por lo que los tres LEDs permanecen apagados.
 
-### 3.8 Integración de los módulos en `main.cpp`
+## 3.6 Integración en <code>main.cpp</code>
 
-`main.cpp` actúa como coordinador general. Crea una instancia del sensor, una instancia del indicador y una variable que conserva el rango anterior:
+El archivo principal incluye las tres interfaces y crea las instancias necesarias:
 
-```cpp
+~~~cpp
 SensorUltrasonico sensor;
 IndicadorLeds indicador;
-
 RangoDistancia rangoAnterior = RangoDistancia::ERROR;
-```
+~~~
 
-La inicialización se realiza una sola vez en `setup()`:
+<code>rangoAnterior</code> comienza en <code>ERROR</code> porque al encender la placa todavía no existe una lectura previa. Posteriormente conserva el resultado de cada ciclo para aplicar la histéresis en la medición siguiente.
 
-```cpp
+La inicialización se ejecuta una sola vez:
+
+~~~cpp
 void setup() {
     sensor.begin();
     indicador.begin();
 }
-```
+~~~
 
-El ciclo principal implementa la integración completa:
+La relación entre rango lógico y salida visual está definida por <code>convertirAEstado()</code>:
 
-```cpp
+| Rango recibido | Estado devuelto |
+| --- | --- |
+| <code>CERCANO</code> | <code>Rojo</code> |
+| <code>MEDIO</code> | <code>Amarillo</code> |
+| <code>LEJANO</code> | <code>Verde</code> |
+| <code>ERROR</code> | <code>Error</code> |
+
+Finalmente, <code>loop()</code> conecta los módulos en el orden diseñado:
+
+~~~cpp
 void loop() {
     LecturaDistancia lectura = sensor.medirDistanciaCm();
 
-    rangoAnterior = clasificarDistancia(lectura, rangoAnterior);
+    rangoAnterior =
+        clasificarDistancia(lectura, rangoAnterior);
 
-    EstadoIndicador estado = convertirAEstado(rangoAnterior);
+    EstadoIndicador estado =
+        convertirAEstado(rangoAnterior);
+
     indicador.mostrar(estado);
-
     delay(100);
 }
-```
+~~~
 
-Cada repetición ejecuta cinco acciones:
+El archivo principal no genera directamente el pulso ultrasónico, no contiene los límites de clasificación y no escribe directamente en los pines de los LEDs. Su responsabilidad se limita a coordinar las interfaces públicas, completando la implementación de **RF3**.
 
-1. Solicita una medición al módulo ultrasónico.
-2. Entrega la lectura y el rango anterior al clasificador.
-3. Guarda el nuevo rango para utilizarlo en la siguiente medición.
-4. Convierte el concepto de distancia en un estado visual.
-5. Solicita al indicador que encienda el LED correspondiente.
+## 3.7 Calidad y mantenibilidad del código
 
-La conversión entre rango y color se mantiene en `main.cpp` para evitar que el clasificador dependa de los LEDs:
+Las prácticas aplicadas en la implementación son:
 
-```cpp
-EstadoIndicador convertirAEstado(RangoDistancia rango) {
-    switch (rango) {
-        case RangoDistancia::CERCANO:
-            return EstadoIndicador::Rojo;
-        case RangoDistancia::MEDIO:
-            return EstadoIndicador::Amarillo;
-        case RangoDistancia::LEJANO:
-            return EstadoIndicador::Verde;
-        case RangoDistancia::ERROR:
-        default:
-            return EstadoIndicador::Error;
-    }
-}
-```
+- **Responsabilidad única:** cada módulo atiende una parte del problema.
+- **Encapsulamiento:** los pines y parámetros internos de las clases son privados.
+- **Dato compartido:** <code>LecturaDistancia</code> evita tipos duplicados entre módulos.
+- **Estados explícitos:** las enumeraciones reemplazan números sin significado.
+- **Configuración centralizada:** los límites de la aplicación se encuentran en <code>Config.h</code>.
+- **Constantes protegidas:** <code>constexpr</code> impide modificaciones accidentales.
+- **Manejo de errores:** una medición no confiable produce un estado conocido.
+- **Salida exclusiva:** el indicador apaga todos los LEDs antes de seleccionar uno.
+- **Interfaces limitadas:** <code>main.cpp</code> usa operaciones públicas y no accede a los detalles privados.
+- **Nombres descriptivos:** funciones como <code>medirDistanciaCm()</code>, <code>clasificarDistancia()</code> y <code>apagarTodos()</code> expresan su propósito.
 
-Esta decisión conserva la independencia de los módulos. El clasificador expresa qué tan lejos está el objeto, el indicador conoce los colores disponibles y `main.cpp` establece la relación entre ambos. Así se satisface **RF3**, ya que cada rango produce un comportamiento visual diferente.
-
-### 3.9 Correspondencia entre requerimientos e implementación
-
-| Requerimiento | Implementación responsable | Evidencia en el código |
-| --- | --- | --- |
-| **RF1. Medir la distancia** | `SensorUltrasonico` y `LecturaDistancia` | Generación del pulso, lectura de ECHO, cálculo en centímetros y validación del resultado. |
-| **RF2. Clasificar en tres rangos** | `ClasificadorDistancia` y `Config.h` | Rangos `CERCANO`, `MEDIO` y `LEJANO`, con límites contiguos en 20 y 40 cm. |
-| **RF3. Activar actuadores según el rango** | `convertirAEstado()`, `IndicadorLeds` y `main.cpp` | Conversión de cada rango en un color y activación exclusiva del GPIO correspondiente. |
-| **Estabilidad** | Histéresis y tiempo máximo del sensor | Margen de 2 cm para evitar oscilaciones y timeout de 30 000 µs ante ausencia de eco. |
-| **Tiempo de respuesta** | Ciclo principal | Se realiza una nueva iteración después de una espera de 100 ms. El valor definitivo debe verificarse físicamente. |
-| **Frecuencia de muestreo** | `loop()` y `delay(100)` | La implementación busca varias mediciones por segundo; la frecuencia real debe medirse durante las pruebas. |
-| **Exactitud** | Fórmula de conversión y validación física | Usa la velocidad nominal del sonido y descarta resultados fuera de 2–400 cm; el error real debe compararse con una referencia física. |
-| **Modularidad y legibilidad** | División en clases, función pura, estructura compartida y constantes | Cada módulo tiene una responsabilidad identificable y una interfaz limitada. |
-
-La tabla diferencia las características implementadas de aquellas que todavía requieren evidencia experimental. La estabilidad continua, el tiempo real de respuesta, la frecuencia efectiva y el error de medición no se presentan aquí como resultados comprobados; su verificación corresponde a la sección de Pruebas y Validaciones.
-
-### 3.10 Buenas prácticas aplicadas
-
-Durante la implementación se aplicaron las siguientes decisiones para mejorar la calidad y mantenibilidad del código:
-
-- **Responsabilidad única:** el sensor mide, el clasificador decide, el indicador actúa y `main.cpp` coordina.
-- **Encapsulamiento:** los pines y parámetros internos de las clases no se modifican directamente desde otros módulos.
-- **Tipo de dato compartido:** `LecturaDistancia` evita estructuras duplicadas y mantiene unidos el valor y su validez.
-- **Enumeraciones explícitas:** `RangoDistancia` y `EstadoIndicador` evitan utilizar números sin significado para representar estados.
-- **Configuración centralizada:** los límites se encuentran en `Config.h` y no dispersos por el programa.
-- **Constantes de compilación:** `constexpr` impide modificaciones accidentales de los umbrales y pines.
-- **Manejo seguro de errores:** la ausencia de eco, las distancias físicas inválidas y las distancias fuera del rango de trabajo conducen a un estado conocido.
-- **Salida exclusiva:** antes de encender un LED se apagan los tres, evitando estados visuales contradictorios.
-- **Separación entre interfaz e implementación:** los archivos `.h` publican las operaciones necesarias y los `.cpp` contienen sus detalles.
-- **Nombres descriptivos:** identificadores como `medirDistanciaCm`, `clasificarDistancia`, `rangoAnterior` y `apagarTodos` permiten comprender la intención del código.
-
-En conjunto, la implementación cubre el recorrido completo desde la adquisición del dato físico hasta la respuesta visual. La estructura permite modificar los límites, sustituir el indicador o probar la clasificación sin reescribir el control del sensor, lo cual facilita el mantenimiento, la explicación durante la defensa y la ampliación futura del prototipo.
-
+La implementación también incorpora decisiones que apoyan los requerimientos no funcionales: el timeout limita la espera ante ausencia de eco, la histéresis reduce oscilaciones y la espera de 100 ms establece una actualización periódica. Estos mecanismos constituyen evidencia de diseño e implementación, pero los valores reales de estabilidad, exactitud, respuesta y muestreo deberán confirmarse mediante las pruebas correspondientes.
