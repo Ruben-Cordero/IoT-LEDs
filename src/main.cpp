@@ -1,18 +1,43 @@
 #include <Arduino.h>
 
-// put function declarations here:
-int myFunction(int, int);
+#include "SensorUltrasonico.h"
+#include "ClasificadorDistancia.h"
+#include "IndicadorLeds.h"
+
+SensorUltrasonico sensor;
+IndicadorLeds indicador;
+
+RangoDistancia rangoAnterior = RangoDistancia::ERROR;
+
+EstadoIndicador convertirAEstado(RangoDistancia rango) {
+    switch (rango) {
+        case RangoDistancia::CERCANO:
+            return EstadoIndicador::Rojo;
+
+        case RangoDistancia::MEDIO:
+            return EstadoIndicador::Amarillo;
+
+        case RangoDistancia::LEJANO:
+            return EstadoIndicador::Verde;
+
+        case RangoDistancia::ERROR:
+        default:
+            return EstadoIndicador::Error;
+    }
+}
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+    sensor.begin();
+    indicador.begin();
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-}
+    LecturaDistancia lectura = sensor.medirDistanciaCm();
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+    rangoAnterior = clasificarDistancia(lectura, rangoAnterior);
+
+    EstadoIndicador estado = convertirAEstado(rangoAnterior);
+    indicador.mostrar(estado);
+
+    delay(100);
 }

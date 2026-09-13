@@ -3,8 +3,6 @@
 
 namespace {
 
-// Clasificacion "pura", solo por umbrales, sin histeresis.
-// El valor del umbral pertenece siempre al rango superior.
 RangoDistancia clasificarPorUmbrales(float distanciaCm) {
     if (distanciaCm < UMBRAL_CERCA_MEDIO_CM) {
         return RangoDistancia::CERCANO;
@@ -15,28 +13,25 @@ RangoDistancia clasificarPorUmbrales(float distanciaCm) {
     return RangoDistancia::LEJANO;
 }
 
-} // namespace
+}
 
-RangoDistancia clasificarDistancia(const LecturaSensor& lectura, RangoDistancia rangoAnterior) {
-    // Lectura marcada como invalida por el sensor.
-    if (!lectura.esValida) {
+RangoDistancia clasificarDistancia(const LecturaDistancia& lectura, RangoDistancia rangoAnterior) {
+
+    if (!lectura.valida) {
         return RangoDistancia::ERROR;
     }
 
     const float distancia = lectura.distanciaCm;
 
-    // Fuera del rango de trabajo del sensor.
+    
     if (distancia < DISTANCIA_MINIMA_VALIDA_CM || distancia > DISTANCIA_MAXIMA_VALIDA_CM) {
         return RangoDistancia::ERROR;
     }
 
-    // Sin clasificacion previa valida: no hay nada que estabilizar.
     if (rangoAnterior == RangoDistancia::ERROR) {
         return clasificarPorUmbrales(distancia);
     }
 
-    // Con clasificacion previa: solo se cambia de rango cuando la
-    // distancia supera el umbral correspondiente por el margen configurado.
     switch (rangoAnterior) {
         case RangoDistancia::CERCANO:
             if (distancia >= UMBRAL_CERCA_MEDIO_CM + MARGEN_HISTERESIS_CM) {
