@@ -805,14 +805,14 @@ Esta instrumentación se utiliza exclusivamente para observar y registrar result
 
 | Referencia | Lectura 1 | Lectura 2 | Lectura 3 | Promedio | Error absoluto | ¿Cumple? |
 | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
-| 10 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 20 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 30 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 40 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 60 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 100 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 150 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| 200 cm | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| 10 cm | 11.20 cm | 10.75 cm | 10.56 cm | 10.84 cm | Pendiente | Pendiente |
+| 20 cm | 21.43 cm | 22.19 cm | 21.27 cm | cm | Pendiente | Pendiente |
+| 30 cm | 31.11 cm | 31.50 cm | 30.73 cm | cm | Pendiente | Pendiente |
+| 40 cm | 40.51 cm | 40.41 cm | 40.26 cm | cm | Pendiente | Pendiente |
+| 60 cm | 60.02 cm | 60.97 cm | 60.32 cm | cm | Pendiente | Pendiente |
+| 100 cm | 100.24 cm | 100.02 cm | 100.25 cm | cm | Pendiente | Pendiente |
+| 150 cm | 149.98 cm | 150.79 cm | 149.77 cm | cm | Pendiente | Pendiente |
+| 200 cm | 201.36 cm | 200.23 cm | 199.39 cm | cm | Pendiente | Pendiente |
 
 ### 4.6.2 <code>PR-INDICADOR-001</code>
 
@@ -822,11 +822,11 @@ Esta instrumentación se utiliza exclusivamente para observar y registrar result
 
 | Caso | Preparación | Resultado esperado | Resultado observado | Estado |
 | --- | --- | --- | --- | --- |
-| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Pendiente | Pendiente |
-| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Pendiente | Pendiente |
-| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Pendiente | Pendiente |
-| I04 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Pendiente | Pendiente |
-| I05 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Pendiente | Pendiente |
+| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Solo LED rojo encendido. | Aceptado |
+| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Solo LED amarillo encendido. | Aceptado |
+| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Solo LED verde encendido. | Aceptado |
+| I04 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Los tres LEDs apagados. | Aceptado |
+| I05 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Los tres LEDs apagados por estar fuera del rango de trabajo. | Aceptado |
 
 **Procedimiento:** colocar el objeto en cada condición, esperar al menos un segundo y observar los tres LEDs. En ningún caso válido pueden permanecer encendidos dos LEDs simultáneamente.
 
@@ -838,14 +838,14 @@ Esta instrumentación se utiliza exclusivamente para observar y registrar result
 
 **Objetivo:** confirmar que pequeñas variaciones alrededor de 20 y 40 cm no producen oscilación continua del indicador.
 
-| Secuencia | Estado inicial | Distancias aplicadas en orden | Resultado esperado |
-| --- | --- | --- | --- |
-| H01 | <code>CERCANO</code> | 19 → 21 → 19 → 21 cm | Permanece rojo durante toda la secuencia. |
-| H02 | <code>CERCANO</code> | 21 → 22 cm | Permanece rojo en 21 cm y cambia a amarillo al alcanzar 22 cm. |
-| H03 | <code>MEDIO</code> | 20 → 19 → 18 → 17 cm | Permanece amarillo hasta 18 cm y cambia a rojo en 17 cm. |
-| H04 | <code>MEDIO</code> | 39 → 41 → 39 → 41 cm | Permanece amarillo durante toda la secuencia. |
-| H05 | <code>MEDIO</code> | 41 → 42 cm | Permanece amarillo en 41 cm y cambia a verde al alcanzar 42 cm. |
-| H06 | <code>LEJANO</code> | 40 → 39 → 38 → 37 cm | Permanece verde hasta 38 cm y cambia a amarillo en 37 cm. |
+| Secuencia | Estado inicial | Distancias aplicadas en orden | Resultado esperado | Resultado observado |
+| --- | --- | --- | --- | --- |
+| H01 | <code>CERCANO</code> | 19 → 21 → 19 → 21 cm | Permanece rojo durante toda la secuencia. | Permanece rojo durante toda la secuencia. |
+| H02 | <code>CERCANO</code> | 21 → 22 cm | Permanece rojo en 21 cm y cambia a amarillo al alcanzar 22 cm. | Permanece rojo en 21 cm y cambia a amarillo al alcanzar 22 cm. |
+| H03 | <code>MEDIO</code> | 20 → 19 → 18 → 17 cm | Permanece amarillo hasta 18 cm y cambia a rojo en 17 cm. | Permanece amarillo hasta 18 cm y cambia a rojo en 17 cm. |
+| H04 | <code>MEDIO</code> | 39 → 41 → 39 → 41 cm | Permanece amarillo durante toda la secuencia. | Oscila entre amarillo y verde |
+| H05 | <code>MEDIO</code> | 41 → 42 cm | Permanece amarillo en 41 cm y cambia a verde al alcanzar 42 cm. | Permanece amarillo en 41 cm y cambia a verde al alcanzar 42 cm.|
+| H06 | <code>LEJANO</code> | 40 → 39 → 38 → 37 cm | Permanece verde hasta 38 cm y cambia a amarillo en 37 cm. | Permanece verde hasta 38 cm y cambia a amarillo en 37 cm. |
 
 **Procedimiento:** utilizar el valor mostrado por la instrumentación de diagnóstico para posicionar el objeto, aplicar cada secuencia lentamente y registrar el color observado después de cada lectura.
 
@@ -890,7 +890,7 @@ frecuencia = cantidad de lecturas / duración en segundos
 
 | Duración | Lecturas registradas | Frecuencia calculada | Criterio | Estado |
 | ---: | ---: | ---: | ---: | --- |
-| 10 s | Pendiente | Pendiente | ≥ 2 lecturas/s | Pendiente |
+| 10 s | 74 | 7.4 | ≥ 2 lecturas/s | Posi |
 
 ### 4.6.6 <code>PR-ESTABILIDAD-001</code>
 
@@ -907,12 +907,12 @@ frecuencia = cantidad de lecturas / duración en segundos
 
 | Tiempo | Condición aplicada | Respuesta esperada | Respuesta observada | Incidencias |
 | ---: | --- | --- | --- | --- |
-| 0 min | 10 cm | Rojo | Pendiente | Pendiente |
-| 2 min | 30 cm | Amarillo | Pendiente | Pendiente |
-| 4 min | 60 cm | Verde | Pendiente | Pendiente |
-| 6 min | Sin eco | Todos apagados | Pendiente | Pendiente |
-| 8 min | 10 cm | Rojo | Pendiente | Pendiente |
-| 10 min | 60 cm | Verde | Pendiente | Pendiente |
+| 0 min | 10 cm | Rojo | Rojo | Ninguna |
+| 2 min | 30 cm | Amarillo | Amarillo | Ninguna |
+| 4 min | 60 cm | Verde | Verde | Ninguna |
+| 6 min | Sin eco | Todos apagados | Todos apagados | Ninguna |
+| 8 min | 10 cm | Rojo | Rojo | Ninguna |
+| 10 min | 60 cm | Verde | Verde | Ninguna |
 
 **Criterio de aceptación:** completar los 10 minutos sin reinicios ni bloqueos y responder correctamente en los seis puntos de observación.
 
