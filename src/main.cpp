@@ -26,7 +26,22 @@ EstadoIndicador convertirAEstado(RangoDistancia rango) {
     }
 }
 
+const char* rangoATexto(RangoDistancia rango) {
+    switch (rango) {
+        case RangoDistancia::CERCANO:
+            return "CERCANO";
+        case RangoDistancia::MEDIO:
+            return "MEDIO";
+        case RangoDistancia::LEJANO:
+            return "LEJANO";
+        case RangoDistancia::ERROR:
+        default:
+            return "ERROR";
+    }
+}
+
 void setup() {
+    Serial.begin(115200);
     sensor.begin();
     indicador.begin();
 }
@@ -38,6 +53,14 @@ void loop() {
 
     EstadoIndicador estado = convertirAEstado(rangoAnterior);
     indicador.mostrar(estado);
+
+    Serial.print(millis());
+    Serial.print(",");
+    Serial.print(lectura.distanciaCm, 2);
+    Serial.print(",");
+    Serial.print(lectura.valida ? "true" : "false");
+    Serial.print(",");
+    Serial.println(rangoATexto(rangoAnterior));
 
     delay(100);
 }

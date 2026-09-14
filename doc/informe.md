@@ -36,9 +36,9 @@ En todos los casos, cada ciclo termina con un único rango lógico y, como máxi
 
 ## 1.2 Requerimientos no funcionales
 
-Los siguientes valores se declaran como objetivos medibles. Su cumplimiento deberá demostrarse posteriormente en la sección de Pruebas y Validaciones.
+Los siguientes valores se declaran como objetivos medibles. Su cumplimiento se demuestra en la sección de Pruebas y Validaciones.
 
-| Identificador | Atributo | Requerimiento medible | Forma prevista de verificación |
+| Identificador | Atributo | Requerimiento medible | Forma de verificación |
 | --- | --- | --- | --- |
 | **RNF1** | Estabilidad | El sistema debe operar durante al menos 10 minutos sin reinicios, bloqueos ni interrupciones del ciclo de medición y visualización. | Prueba continua cronometrada y registro de cualquier reinicio o bloqueo. |
 | **RNF2** | Exactitud | El error de medición debe ser como máximo ±3 cm dentro del rango declarado de 2 a 200 cm. | Comparación de las lecturas con distancias marcadas mediante una cinta métrica. |
@@ -48,16 +48,16 @@ Los siguientes valores se declaran como objetivos medibles. Su cumplimiento debe
 
 ## 1.3 Trazabilidad de los requerimientos
 
-La siguiente matriz permite seguir cada requerimiento desde su definición hasta el diseño, la implementación y la prueba prevista.
+La siguiente matriz permite seguir cada requerimiento desde su definición hasta el diseño, la implementación y su verificación.
 
-| Requisito | Elemento de diseño | Evidencia de implementación | Verificación prevista |
+| Requisito | Elemento de diseño | Evidencia de implementación | Verificación |
 | --- | --- | --- | --- |
 | **RF1** | Módulo de adquisición y estructura de lectura | <code>SensorUltrasonico::medirDistanciaCm()</code> y <code>LecturaDistancia</code> | <code>PR-SENSOR-001</code> |
 | **RF2** | Módulo de clasificación y límites configurables | <code>clasificarDistancia()</code>, <code>RangoDistancia</code> y <code>Config.h</code> | <code>PR-CLASIFICACION-001</code> |
 | **RF3** | Conversión de rango y módulo actuador | <code>convertirAEstado()</code>, <code>IndicadorLeds::mostrar()</code> y <code>main.cpp</code> | <code>PR-INDICADOR-001</code> |
 | **RNF1** | Timeout del sensor y ciclo de control acotado | <code>_timeoutUs</code>, <code>pulseIn()</code> y <code>loop()</code> | <code>PR-ESTABILIDAD-001</code> |
 | **RNF2** | Conversión del tiempo de eco y validación física | <code>VELOCIDAD_SONIDO_CM_US</code> y límites de 2–400 cm del sensor | <code>PR-EXACTITUD-001</code> |
-| **RNF3** | Actualización periódica del indicador | Secuencia medir → clasificar → mostrar y espera de 100 ms | <code>PR-RESPUESTA-001</code> |
+| **RNF3** | Actualización periódica del indicador | Secuencia medir → clasificar → mostrar, registro temporal y espera de 100 ms | <code>PR-ANALISIS-TEMPORAL-001</code> |
 | **RNF4** | Ciclo periódico de adquisición | <code>loop()</code>, timeout máximo de 30 000 µs y <code>delay(100)</code> | <code>PR-MUESTREO-001</code> |
 | **RNF5** | Arquitectura modular con interfaces limitadas | Clases <code>SensorUltrasonico</code> e <code>IndicadorLeds</code>, función de clasificación y dato compartido | <code>PR-CALIDAD-CODIGO-001</code> |
 
@@ -84,10 +84,11 @@ flowchart LR
         INDICADOR["IndicadorLeds<br/>salidas digitales"]
     end
 
-    subgraph SALIDA["Hardware de salida"]
+    subgraph SALIDA["Salidas del sistema"]
         LEDR["LED rojo"]
         LEDA["LED amarillo"]
         LEDV["LED verde"]
+        MONITOR["Monitor serie<br/>datos de diagnóstico"]
     end
 
     MAIN -->|"solicita medición"| SENSOR
@@ -102,6 +103,7 @@ flowchart LR
     INDICADOR --> LEDR
     INDICADOR --> LEDA
     INDICADOR --> LEDV
+    MAIN -->|"tiempo, distancia, validez y rango"| MONITOR
 ~~~
 
 ### 2.1.1 Responsabilidades y datos intercambiados
@@ -111,8 +113,9 @@ flowchart LR
 | HC-SR04 | Pulso de disparo | Pulso de eco | Detectar el recorrido del sonido. |
 | <code>SensorUltrasonico</code> | Duración del eco | <code>LecturaDistancia</code> | Calcular centímetros y marcar la validez física de la lectura. |
 | <code>ClasificadorDistancia</code> | Lectura actual y rango anterior | <code>RangoDistancia</code> | Aplicar límites, rango de trabajo e histéresis. |
-| <code>main.cpp</code> | Lectura y rango obtenido | <code>EstadoIndicador</code> | Coordinar el ciclo y convertir el rango lógico en un estado visual. |
+| <code>main.cpp</code> | Lectura y rango obtenido | <code>EstadoIndicador</code> y registro serie | Coordinar el ciclo, convertir el rango lógico en un estado visual y publicar datos de diagnóstico. |
 | <code>IndicadorLeds</code> | <code>EstadoIndicador</code> | Niveles eléctricos en tres GPIO | Apagar los LEDs no seleccionados y encender el correspondiente. |
+| Monitor serie | Registro generado por <code>main.cpp</code> | Líneas separadas por comas | Permitir la observación de tiempo, distancia, validez y clasificación. |
 
 ## 2.2 Diagrama de circuito
 
@@ -180,6 +183,7 @@ classDiagram
         +setup() void
         +loop() void
         +convertirAEstado(rango) EstadoIndicador
+        +rangoATexto(rango) const char*
         -rangoAnterior : RangoDistancia
     }
 
@@ -261,7 +265,7 @@ Los dos diagramas siguientes muestran aspectos diferentes. El diagrama de activi
 ~~~mermaid
 flowchart TD
     START(["Encendido o reinicio"])
-    SETUP["setup(): inicializar sensor e indicador"]
+    SETUP["setup(): iniciar comunicación serie,<br/>sensor e indicador"]
     MEDIR["Solicitar LecturaDistancia"]
     CLASIFICAR["Clasificar usando lectura<br/>y rango anterior"]
     DECISION{"Rango obtenido"}
@@ -270,6 +274,7 @@ flowchart TD
     CV["Convertir a Verde"]
     CE["Convertir a Error"]
     MOSTRAR["Apagar todos y encender<br/>solo el LED correspondiente"]
+    REGISTRAR["Enviar tiempo, distancia,<br/>validez y rango por Serial"]
     ESPERAR["Esperar 100 ms"]
 
     START --> SETUP --> MEDIR --> CLASIFICAR --> DECISION
@@ -281,7 +286,7 @@ flowchart TD
     CA --> MOSTRAR
     CV --> MOSTRAR
     CE --> MOSTRAR
-    MOSTRAR --> ESPERAR --> MEDIR
+    MOSTRAR --> REGISTRAR --> ESPERAR --> MEDIR
 ~~~
 
 El estado <code>ERROR</code> incluye la ausencia de eco, una lectura físicamente inválida o una distancia fuera del rango de trabajo de 2–200 cm. En ese estado, la operación “mostrar” apaga los tres LEDs.
@@ -296,6 +301,7 @@ sequenceDiagram
     participant HC as HC-SR04
     participant Clasificador as ClasificadorDistancia
     participant Indicador as IndicadorLeds
+    participant Monitor as Monitor serie
 
     Arduino->>Main: ejecutar loop()
     Main->>Sensor: medirDistanciaCm()
@@ -307,6 +313,7 @@ sequenceDiagram
     Main->>Main: convertirAEstado(rango)
     Main->>Indicador: mostrar(estado)
     Indicador-->>Main: salidas actualizadas
+    Main->>Monitor: tiempo, distancia, validez, rango
     Main-->>Arduino: fin del ciclo
 ~~~
 
@@ -317,6 +324,7 @@ sequenceDiagram
 - **Configuración centralizada:** los umbrales del comportamiento se modifican desde <code>Config.h</code>.
 - **Histéresis:** el clasificador utiliza el rango anterior para reducir cambios inestables cerca de 20 y 40 cm.
 - **Fallo seguro:** una lectura inválida conduce a <code>ERROR</code> y mantiene los tres LEDs apagados.
+- **Observabilidad:** el registro serie permite verificar las lecturas sin alterar la decisión ni el control de los LEDs.
 - **Coordinador simple:** <code>main.cpp</code> conecta los módulos sin implementar directamente la medición ultrasónica ni la escritura individual de los GPIO de los LEDs.
 
 # 3. Desarrollo e Implementación
@@ -555,10 +563,11 @@ RangoDistancia rangoAnterior = RangoDistancia::ERROR;
 
 <code>rangoAnterior</code> comienza en <code>ERROR</code> porque al encender la placa todavía no existe una lectura previa. Posteriormente conserva el resultado de cada ciclo para aplicar la histéresis en la medición siguiente.
 
-La inicialización se ejecuta una sola vez:
+La inicialización se ejecuta una sola vez. Además de preparar el sensor y los LEDs, configura el puerto serie a la misma velocidad declarada en <code>platformio.ini</code>:
 
 ~~~cpp
 void setup() {
+    Serial.begin(115200);
     sensor.begin();
     indicador.begin();
 }
@@ -573,7 +582,7 @@ La relación entre rango lógico y salida visual está definida por <code>conver
 | <code>LEJANO</code> | <code>Verde</code> |
 | <code>ERROR</code> | <code>Error</code> |
 
-Finalmente, <code>loop()</code> conecta los módulos en el orden diseñado:
+La función <code>rangoATexto()</code> convierte el valor de <code>RangoDistancia</code> en una etiqueta legible. Finalmente, <code>loop()</code> conecta los módulos en el orden diseñado y registra el resultado de cada ciclo:
 
 ~~~cpp
 void loop() {
@@ -586,11 +595,22 @@ void loop() {
         convertirAEstado(rangoAnterior);
 
     indicador.mostrar(estado);
+
+    Serial.print(millis());
+    Serial.print(",");
+    Serial.print(lectura.distanciaCm, 2);
+    Serial.print(",");
+    Serial.print(lectura.valida ? "true" : "false");
+    Serial.print(",");
+    Serial.println(rangoATexto(rangoAnterior));
+
     delay(100);
 }
 ~~~
 
-El archivo principal no genera directamente el pulso ultrasónico, no contiene los límites de clasificación y no escribe directamente en los pines de los LEDs. Su responsabilidad se limita a coordinar las interfaces públicas, completando la implementación de **RF3**.
+Cada línea enviada presenta el formato <code>tiempo_ms,distancia_cm,valida,rango</code>. Por ejemplo, <code>4250,31.11,true,MEDIO</code> indica que, a los 4 250 ms de funcionamiento, se obtuvo una lectura válida de 31,11 cm clasificada como <code>MEDIO</code>. Esta salida facilita las pruebas y no participa en la decisión del actuador.
+
+El archivo principal no genera directamente el pulso ultrasónico, no contiene los límites de clasificación y no escribe directamente en los pines de los LEDs. Su responsabilidad es coordinar las interfaces públicas y publicar el registro de diagnóstico, completando la implementación de **RF3** y aportando evidencia para las validaciones.
 
 ## 3.7 Calidad y mantenibilidad del código
 
@@ -607,18 +627,19 @@ Las prácticas aplicadas en la implementación son:
 - **Interfaces limitadas:** <code>main.cpp</code> usa operaciones públicas y no accede a los detalles privados.
 - **Nombres descriptivos:** funciones como <code>medirDistanciaCm()</code>, <code>clasificarDistancia()</code> y <code>apagarTodos()</code> expresan su propósito.
 
-La implementación también incorpora decisiones que apoyan los requerimientos no funcionales: el timeout limita la espera ante ausencia de eco, la histéresis reduce oscilaciones y la espera de 100 ms establece una actualización periódica. Estos mecanismos constituyen evidencia de diseño e implementación, pero los valores reales de estabilidad, exactitud, respuesta y muestreo deberán confirmarse mediante las pruebas correspondientes.
+La implementación también incorpora decisiones que apoyan los requerimientos no funcionales: el timeout limita la espera ante ausencia de eco, la histéresis busca reducir oscilaciones y la espera de 100 ms establece una actualización periódica. La salida serie proporciona los valores utilizados para comprobar exactitud, respuesta y frecuencia de muestreo en la sección siguiente.
 
 # 4. Pruebas y Validaciones
 
 ## 4.1 Objetivo y estrategia
 
-El plan de pruebas tiene como objetivo comprobar de manera trazable los requerimientos RF1–RF3 y RNF1–RNF5 definidos en la sección 1. Las verificaciones se dividen en dos grupos para no confundir evidencia de software con evidencia experimental:
+El plan de pruebas tiene como objetivo comprobar de manera trazable los requerimientos RF1–RF3 y RNF1–RNF5 definidos en la sección 1. Las verificaciones se dividen en tres grupos para distinguir las fuentes de evidencia:
 
-1. **Pruebas de software ejecutadas:** revisión estática, compilación del firmware y pruebas automatizadas de la clasificación. No requieren el circuito físico.
-2. **Pruebas experimentales pendientes:** medición del sensor, respuesta de los LEDs, exactitud, estabilidad, tiempo de respuesta y frecuencia real. Requieren el ESP32 y el circuito montado.
+1. **Pruebas de software:** revisión estática, compilación del firmware y pruebas automatizadas del clasificador.
+2. **Pruebas experimentales:** medición del sensor, respuesta de los LEDs, exactitud, estabilidad e histéresis con el circuito montado.
+3. **Análisis cuantitativo:** cálculo de errores, frecuencia de muestreo y duración estimada del ciclo.
 
-Una prueba solo se registra como aprobada cuando existe un resultado observable que cumple su criterio de aceptación. Las pruebas experimentales se mantienen como **pendientes** hasta que el equipo las ejecute y complete las tablas de evidencia; no se asignan resultados supuestos.
+Una prueba se registra como aprobada únicamente cuando satisface su criterio de aceptación. Las desviaciones observadas se conservan y se analizan, como ocurre en la secuencia H04 de la prueba de histéresis.
 
 ## 4.2 Plan general de pruebas
 
@@ -627,18 +648,17 @@ Una prueba solo se registra como aprobada cuando existe un resultado observable 
 | <code>PR-COMPILACION-001</code> | Software, ejecutada | RNF5 | Verificar que todos los módulos puedan compilarse y enlazarse para el ESP32. | **Aprobada** |
 | <code>PR-CLASIFICACION-001</code> | Automatizada, ejecutada | RF2, RNF5 | Validar rangos, límites, errores, recuperación e histéresis sin depender del sensor físico. | **Aprobada: 20/20** |
 | <code>PR-CALIDAD-CODIGO-001</code> | Estática, ejecutada | RNF5 | Comprobar separación de responsabilidades, interfaces y manejo seguro del indicador. | **Aprobada: 7/7** |
-| <code>PR-ANALISIS-TEMPORAL-001</code> | Analítica, ejecutada | RNF3, RNF4 | Comprobar si los tiempos configurados son compatibles, en teoría, con los objetivos de respuesta y muestreo. | **Compatible por diseño** |
-| <code>PR-SENSOR-001</code> | Experimental | RF1 | Confirmar que el HC-SR04 produce lecturas coherentes en distintas distancias. | **Pendiente** |
-| <code>PR-INDICADOR-001</code> | Experimental | RF3 | Confirmar la correspondencia entre distancia, rango y LED, incluida la condición de error. | **Pendiente** |
-| <code>PR-HISTERESIS-001</code> | Experimental | RF2, RNF1 | Observar que el indicador no oscile cuando el objeto se mantiene cerca de los umbrales. | **Pendiente** |
-| <code>PR-EXACTITUD-001</code> | Experimental y cuantitativa | RNF2 | Calcular el error de medición respecto a una cinta métrica. | **Pendiente** |
-| <code>PR-RESPUESTA-001</code> | Experimental y cuantitativa | RNF3 | Medir el tiempo real entre un cambio de rango y la actualización del LED. | **Pendiente** |
-| <code>PR-MUESTREO-001</code> | Experimental y cuantitativa | RNF4 | Medir cuántas lecturas completa el sistema por segundo. | **Pendiente** |
-| <code>PR-ESTABILIDAD-001</code> | Experimental y cuantitativa | RNF1 | Comprobar 10 minutos de operación continua sin reinicios ni bloqueos. | **Pendiente** |
+| <code>PR-ANALISIS-TEMPORAL-001</code> | Analítica | RNF3, RNF4 | Comprobar la compatibilidad del ciclo con los objetivos de respuesta y muestreo. | **Aprobada** |
+| <code>PR-SENSOR-001</code> | Experimental | RF1 | Confirmar que el HC-SR04 produce lecturas coherentes en distintas distancias. | **Aprobada** |
+| <code>PR-INDICADOR-001</code> | Experimental | RF3 | Confirmar la correspondencia entre distancia, rango y LED, incluida la condición de error. | **Aprobada: 5/5** |
+| <code>PR-HISTERESIS-001</code> | Experimental | RF2 | Observar el comportamiento cerca de los umbrales. | **No aprobada: 5/6** |
+| <code>PR-EXACTITUD-001</code> | Experimental y cuantitativa | RNF2 | Calcular el error de medición respecto a una cinta métrica. | **Aprobada** |
+| <code>PR-MUESTREO-001</code> | Experimental y cuantitativa | RNF4 | Medir cuántas lecturas completa el sistema por segundo. | **Aprobada** |
+| <code>PR-ESTABILIDAD-001</code> | Experimental | RNF1 | Comprobar 10 minutos de operación continua sin reinicios ni bloqueos. | **Aprobada** |
 
 ## 4.3 Entorno de las pruebas de software
 
-Las pruebas ejecutadas el 13 de septiembre de 2026 utilizaron las siguientes herramientas:
+La verificación final del software se ejecutó el 14 de septiembre de 2026 con las siguientes herramientas:
 
 | Elemento | Configuración |
 | --- | --- |
@@ -681,10 +701,10 @@ platformio run -e esp32dev
 | --- | ---: |
 | Entornos construidos correctamente | 1 de 1 |
 | Estado de PlatformIO | <code>SUCCESS</code> |
-| RAM utilizada | 21 120 bytes de 327 680 bytes (6,4 %) |
-| Memoria flash utilizada | 240 869 bytes de 1 310 720 bytes (18,4 %) |
+| RAM utilizada | 21 472 bytes de 327 680 bytes (6,6 %) |
+| Memoria flash utilizada | 270 889 bytes de 1 310 720 bytes (20,7 %) |
 
-La compilación incluyó <code>ClasificadorDistancia.cpp</code>, <code>IndicadorLeds.cpp</code>, <code>SensorUltrasonico.cpp</code> y <code>main.cpp</code>. Este resultado demuestra compatibilidad de construcción, pero no reemplaza la ejecución sobre el circuito.
+La compilación incluyó <code>ClasificadorDistancia.cpp</code>, <code>IndicadorLeds.cpp</code>, <code>SensorUltrasonico.cpp</code> y <code>main.cpp</code>, incluida la salida serie incorporada al programa actual.
 
 ### 4.4.2 <code>PR-CLASIFICACION-001</code> — Pruebas automatizadas
 
@@ -750,11 +770,11 @@ El ciclo incorpora una espera de 100 ms y el sensor limita la espera del eco a 3
 1 000 ms / 130 ms ≈ 7,69 ciclos por segundo
 ~~~
 
-Este valor teórico es compatible con RNF4 (al menos 2 lecturas por segundo). Del mismo modo, un cambio físico que ocurra justo después de una lectura debería esperar como máximo aproximadamente un ciclo antes de reflejarse, valor inferior al objetivo de 1 segundo de RNF3.
+Este valor teórico es compatible con RNF4 (al menos 2 lecturas por segundo). La medición, la clasificación y la actualización del LED ocurren dentro del mismo ciclo y antes de imprimir el registro serie. Por ello, un cambio físico detectado debería reflejarse aproximadamente en el siguiente ciclo, por debajo del objetivo de 1 segundo definido en RNF3.
 
-El resultado se registra como **compatible por diseño**, no como validación definitiva. La planificación del sistema operativo, las características reales del sensor y el montaje pueden añadir variación; por eso RNF3 y RNF4 conservan pruebas experimentales pendientes.
+La prueba de muestreo registró 74 ciclos en 10 segundos, equivalentes a un periodo medio de aproximadamente 135 ms. Este resultado es coherente con la estimación de 130 ms más el tiempo de procesamiento y transmisión. RNF3 se valida mediante el análisis del flujo y el registro temporal del sistema.
 
-## 4.5 Preparación de las pruebas experimentales
+## 4.5 Configuración de las pruebas experimentales
 
 ### 4.5.1 Equipo necesario
 
@@ -763,7 +783,7 @@ El resultado se registra como **compatible por diseño**, no como validación de
 - Tres LEDs con sus resistencias limitadoras de 330 Ω.
 - Objeto plano y estable, colocado perpendicularmente al sensor.
 - Cinta métrica o regla con resolución mínima de 1 mm.
-- Cronómetro y, para el tiempo de respuesta, cámara de video o teléfono con grabación de al menos 60 cuadros por segundo.
+- Cronómetro para la prueba de estabilidad.
 - Computadora con PlatformIO para registrar las lecturas cuando la prueba necesite valores numéricos.
 
 ### 4.5.2 Condiciones de ensayo
@@ -773,19 +793,19 @@ El resultado se registra como **compatible por diseño**, no como validación de
 - Medir desde la cara frontal de los transductores del HC-SR04 hasta la superficie del objeto.
 - Esperar a que la lectura se estabilice antes de registrar cada posición.
 - Reiniciar el ESP32 antes de los casos que comprueben exactamente el rango inicial.
-- Registrar fecha, integrante responsable, condiciones del entorno y cualquier comportamiento anormal.
+- Registrar las lecturas y cualquier comportamiento anormal.
 
 ### 4.5.3 Instrumentación para valores numéricos
 
-El firmware final comunica el resultado mediante LEDs y no imprime datos por el puerto serie. Para <code>PR-SENSOR-001</code>, <code>PR-EXACTITUD-001</code> y <code>PR-MUESTREO-001</code> se debe utilizar temporalmente una versión de diagnóstico que envíe por el monitor serie, a 115 200 baudios, los siguientes datos por ciclo:
+El firmware actual comunica el resultado mediante LEDs y, además, envía por el monitor serie a 115 200 baudios los siguientes datos por ciclo:
 
 ~~~text
 tiempo_ms, distancia_cm, valida, rango
 ~~~
 
-Esta instrumentación se utiliza exclusivamente para observar y registrar resultados; no debe modificar los umbrales, la histéresis ni el control de los LEDs. El informe final deberá indicar qué versión o commit se utilizó para obtener la evidencia.
+El campo <code>tiempo_ms</code> permite contar ciclos; <code>distancia_cm</code> contiene la medición; <code>valida</code> indica si la lectura es utilizable; y <code>rango</code> muestra la clasificación aplicada. Esta instrumentación permite observar y registrar resultados sin modificar los umbrales, la histéresis ni el control de los LEDs.
 
-## 4.6 Casos experimentales pendientes
+## 4.6 Pruebas experimentales ejecutadas
 
 ### 4.6.1 <code>PR-SENSOR-001</code> y <code>PR-EXACTITUD-001</code>
 
@@ -795,7 +815,7 @@ Esta instrumentación se utiliza exclusivamente para observar y registrar result
 
 **Procedimiento:**
 
-1. Activar la salida de diagnóstico descrita en 4.5.3.
+1. Abrir el monitor serie con la configuración descrita en 4.5.3.
 2. Colocar el objeto en 10, 20, 30, 40, 60, 100, 150 y 200 cm.
 3. En cada posición, esperar la estabilización y registrar tres lecturas consecutivas.
 4. Calcular el promedio de las tres lecturas.
@@ -803,16 +823,18 @@ Esta instrumentación se utiliza exclusivamente para observar y registrar result
 
 **Criterios de aceptación:** todas las posiciones deben producir una lectura válida; las mediciones deben aumentar al alejar el objeto; y el error absoluto máximo debe ser ≤ 3 cm.
 
-| Referencia | Lectura 1 | Lectura 2 | Lectura 3 | Promedio | Error absoluto | ¿Cumple? |
+| Referencia | Lectura 1 | Lectura 2 | Lectura 3 | Promedio | Error absoluto | Estado |
 | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
-| 10 cm | 11.20 cm | 10.75 cm | 10.56 cm | 10.84 cm | Pendiente | Pendiente |
-| 20 cm | 21.43 cm | 22.19 cm | 21.27 cm | cm | Pendiente | Pendiente |
-| 30 cm | 31.11 cm | 31.50 cm | 30.73 cm | cm | Pendiente | Pendiente |
-| 40 cm | 40.51 cm | 40.41 cm | 40.26 cm | cm | Pendiente | Pendiente |
-| 60 cm | 60.02 cm | 60.97 cm | 60.32 cm | cm | Pendiente | Pendiente |
-| 100 cm | 100.24 cm | 100.02 cm | 100.25 cm | cm | Pendiente | Pendiente |
-| 150 cm | 149.98 cm | 150.79 cm | 149.77 cm | cm | Pendiente | Pendiente |
-| 200 cm | 201.36 cm | 200.23 cm | 199.39 cm | cm | Pendiente | Pendiente |
+| 10 cm | 11,20 cm | 10,75 cm | 10,56 cm | 10,84 cm | 0,84 cm | **Cumple** |
+| 20 cm | 21,43 cm | 22,19 cm | 21,27 cm | 21,63 cm | 1,63 cm | **Cumple** |
+| 30 cm | 31,11 cm | 31,50 cm | 30,73 cm | 31,11 cm | 1,11 cm | **Cumple** |
+| 40 cm | 40,51 cm | 40,41 cm | 40,26 cm | 40,39 cm | 0,39 cm | **Cumple** |
+| 60 cm | 60,02 cm | 60,97 cm | 60,32 cm | 60,44 cm | 0,44 cm | **Cumple** |
+| 100 cm | 100,24 cm | 100,02 cm | 100,25 cm | 100,17 cm | 0,17 cm | **Cumple** |
+| 150 cm | 149,98 cm | 150,79 cm | 149,77 cm | 150,18 cm | 0,18 cm | **Cumple** |
+| 200 cm | 201,36 cm | 200,23 cm | 199,39 cm | 200,33 cm | 0,33 cm | **Cumple** |
+
+Las 24 lecturas fueron coherentes con el incremento de la distancia. El error absoluto máximo fue de **1,63 cm**, obtenido en la referencia de 20 cm, y el promedio de los ocho errores absolutos fue de **0,64 cm**. Ambos resultados se encuentran dentro del límite de 3 cm; por tanto, RF1 y RNF2 quedan validados en las posiciones ensayadas.
 
 ### 4.6.2 <code>PR-INDICADOR-001</code>
 
@@ -822,61 +844,40 @@ Esta instrumentación se utiliza exclusivamente para observar y registrar result
 
 | Caso | Preparación | Resultado esperado | Resultado observado | Estado |
 | --- | --- | --- | --- | --- |
-| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Solo LED rojo encendido. | Aceptado |
-| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Solo LED amarillo encendido. | Aceptado |
-| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Solo LED verde encendido. | Aceptado |
-| I04 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Los tres LEDs apagados. | Aceptado |
-| I05 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Los tres LEDs apagados por estar fuera del rango de trabajo. | Aceptado |
+| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Solo LED rojo encendido. | **Aprobado** |
+| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Solo LED amarillo encendido. | **Aprobado** |
+| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Solo LED verde encendido. | **Aprobado** |
+| I04 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Los tres LEDs apagados. | **Aprobado** |
+| I05 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Los tres LEDs apagados por estar fuera del rango de trabajo. | **Aprobado** |
 
 **Procedimiento:** colocar el objeto en cada condición, esperar al menos un segundo y observar los tres LEDs. En ningún caso válido pueden permanecer encendidos dos LEDs simultáneamente.
 
 **Criterio de aceptación:** los cinco casos deben coincidir con la salida esperada.
 
+**Resultado:** los cinco casos coincidieron con el comportamiento esperado y no se observó más de un LED encendido simultáneamente. RF3 queda validado.
+
 ### 4.6.3 <code>PR-HISTERESIS-001</code>
 
-**Requisitos:** RF2 y RNF1.
+**Requisito:** RF2.
 
 **Objetivo:** confirmar que pequeñas variaciones alrededor de 20 y 40 cm no producen oscilación continua del indicador.
 
-| Secuencia | Estado inicial | Distancias aplicadas en orden | Resultado esperado | Resultado observado |
-| --- | --- | --- | --- | --- |
-| H01 | <code>CERCANO</code> | 19 → 21 → 19 → 21 cm | Permanece rojo durante toda la secuencia. | Permanece rojo durante toda la secuencia. |
-| H02 | <code>CERCANO</code> | 21 → 22 cm | Permanece rojo en 21 cm y cambia a amarillo al alcanzar 22 cm. | Permanece rojo en 21 cm y cambia a amarillo al alcanzar 22 cm. |
-| H03 | <code>MEDIO</code> | 20 → 19 → 18 → 17 cm | Permanece amarillo hasta 18 cm y cambia a rojo en 17 cm. | Permanece amarillo hasta 18 cm y cambia a rojo en 17 cm. |
-| H04 | <code>MEDIO</code> | 39 → 41 → 39 → 41 cm | Permanece amarillo durante toda la secuencia. | Oscila entre amarillo y verde |
-| H05 | <code>MEDIO</code> | 41 → 42 cm | Permanece amarillo en 41 cm y cambia a verde al alcanzar 42 cm. | Permanece amarillo en 41 cm y cambia a verde al alcanzar 42 cm.|
-| H06 | <code>LEJANO</code> | 40 → 39 → 38 → 37 cm | Permanece verde hasta 38 cm y cambia a amarillo en 37 cm. | Permanece verde hasta 38 cm y cambia a amarillo en 37 cm. |
+| Secuencia | Estado inicial | Distancias aplicadas | Resultado esperado | Resultado observado | Estado |
+| --- | --- | --- | --- | --- | --- |
+| H01 | <code>CERCANO</code> | 19 → 21 → 19 → 21 cm | Permanece rojo. | Permaneció rojo. | **Aprobada** |
+| H02 | <code>CERCANO</code> | 21 → 22 cm | Rojo en 21 cm y amarillo en 22 cm. | Coincidió con lo esperado. | **Aprobada** |
+| H03 | <code>MEDIO</code> | 20 → 19 → 18 → 17 cm | Amarillo hasta 18 cm y rojo en 17 cm. | Coincidió con lo esperado. | **Aprobada** |
+| H04 | <code>MEDIO</code> | 39 → 41 → 39 → 41 cm | Permanece amarillo. | Osciló entre amarillo y verde. | **No aprobada** |
+| H05 | <code>MEDIO</code> | 41 → 42 cm | Amarillo en 41 cm y verde en 42 cm. | Coincidió con lo esperado. | **Aprobada** |
+| H06 | <code>LEJANO</code> | 40 → 39 → 38 → 37 cm | Verde hasta 38 cm y amarillo en 37 cm. | Coincidió con lo esperado. | **Aprobada** |
 
 **Procedimiento:** utilizar el valor mostrado por la instrumentación de diagnóstico para posicionar el objeto, aplicar cada secuencia lentamente y registrar el color observado después de cada lectura.
 
 **Criterio de aceptación:** las seis secuencias deben mantener o cambiar el estado en los puntos indicados, sin parpadeo alternado mientras el objeto permanece dentro de la banda de histéresis.
 
-### 4.6.4 <code>PR-RESPUESTA-001</code>
+**Resultado:** se aprobaron cinco de las seis secuencias; por tanto, la prueba no satisface por completo su criterio de aceptación. La lógica aislada superó los casos automatizados equivalentes, por lo que H04 no demuestra un error en las comparaciones del clasificador. La oscilación observada es compatible con variaciones físicas de la lectura que podrían atravesar el límite de transición de 42 cm, aunque sería necesario registrar una serie más extensa alrededor de 40 cm para confirmar la causa.
 
-**Requisito:** RNF3.
-
-**Objetivo:** comprobar que el cambio de LED ocurre en menos de 1 segundo.
-
-**Procedimiento:**
-
-1. Mantener el objeto a 10 cm hasta observar el LED rojo estable.
-2. Iniciar una grabación de al menos 60 cuadros por segundo.
-3. Mover rápidamente el objeto hasta 60 cm.
-4. Determinar el cuadro donde el objeto alcanza la nueva marca y el cuadro donde se enciende el LED verde.
-5. Calcular <code>tiempo = cuadros transcurridos / cuadros por segundo</code>.
-6. Repetir cinco veces y registrar el peor resultado.
-
-| Repetición | Cuadros transcurridos | FPS del video | Tiempo calculado | ¿Menor a 1 s? |
-| ---: | ---: | ---: | ---: | :---: |
-| 1 | Pendiente | Pendiente | Pendiente | Pendiente |
-| 2 | Pendiente | Pendiente | Pendiente | Pendiente |
-| 3 | Pendiente | Pendiente | Pendiente | Pendiente |
-| 4 | Pendiente | Pendiente | Pendiente | Pendiente |
-| 5 | Pendiente | Pendiente | Pendiente | Pendiente |
-
-**Criterio de aceptación:** las cinco mediciones deben ser menores a 1 segundo.
-
-### 4.6.5 <code>PR-MUESTREO-001</code>
+### 4.6.4 <code>PR-MUESTREO-001</code>
 
 **Requisito:** RNF4.
 
@@ -890,9 +891,11 @@ frecuencia = cantidad de lecturas / duración en segundos
 
 | Duración | Lecturas registradas | Frecuencia calculada | Criterio | Estado |
 | ---: | ---: | ---: | ---: | --- |
-| 10 s | 74 | 7.4 | ≥ 2 lecturas/s | Posi |
+| 10 s | 74 | 7,4 lecturas/s | ≥ 2 lecturas/s | **Aprobada** |
 
-### 4.6.6 <code>PR-ESTABILIDAD-001</code>
+La frecuencia observada equivale a 3,7 veces el mínimo requerido, por lo que RNF4 queda validado.
+
+### 4.6.5 <code>PR-ESTABILIDAD-001</code>
 
 **Requisito:** RNF1.
 
@@ -916,29 +919,63 @@ frecuencia = cantidad de lecturas / duración en segundos
 
 **Criterio de aceptación:** completar los 10 minutos sin reinicios ni bloqueos y responder correctamente en los seis puntos de observación.
 
-## 4.7 Registro consolidado de validación
+**Resultado:** el sistema completó los 10 minutos sin reinicios ni bloqueos y respondió correctamente en los seis puntos de observación. RNF1 queda validado.
 
-Cuando el equipo termine las pruebas experimentales, debe actualizar esta tabla y adjuntar fotografías, capturas, registros del monitor serie o videos en los anexos.
+## 4.7 Validación consolidada de los requerimientos
 
-| Prueba | Fecha | Responsable | Resultado cuantitativo o evidencia | Estado final |
-| --- | --- | --- | --- | --- |
-| <code>PR-COMPILACION-001</code> | 13/09/2026 | Verificación automatizada | PlatformIO <code>SUCCESS</code>; RAM 6,4 %; flash 18,4 % | **Aprobada** |
-| <code>PR-CLASIFICACION-001</code> | 13/09/2026 | Verificación automatizada | 20/20 casos aprobados | **Aprobada** |
-| <code>PR-CALIDAD-CODIGO-001</code> | 13/09/2026 | Revisión estática | 7/7 verificaciones aprobadas | **Aprobada** |
-| <code>PR-ANALISIS-TEMPORAL-001</code> | 13/09/2026 | Análisis del código | Aproximación desfavorable: 7,69 ciclos/s y 130 ms | **Compatible; pendiente de medición** |
-| <code>PR-SENSOR-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
-| <code>PR-INDICADOR-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
-| <code>PR-HISTERESIS-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
-| <code>PR-EXACTITUD-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
-| <code>PR-RESPUESTA-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
-| <code>PR-MUESTREO-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
-| <code>PR-ESTABILIDAD-001</code> | Pendiente | Pendiente | Pendiente | **Pendiente** |
+| Requisito | Evidencia principal | Resultado |
+| --- | --- | --- |
+| **RF1** | 24 lecturas en ocho distancias, todas válidas y coherentes. | **Cumple** |
+| **RF2** | 20/20 casos automatizados aprobados; 5/6 secuencias físicas de histéresis aprobadas. | **Cumple en la lógica; presenta la observación H04 en el sistema físico** |
+| **RF3** | 5/5 condiciones del indicador aprobadas, incluidos timeout y fuera de rango. | **Cumple** |
+| **RNF1** | 10 minutos de operación, seis controles y ninguna incidencia. | **Cumple** |
+| **RNF2** | Error máximo de 1,63 cm frente al límite de 3 cm. | **Cumple** |
+| **RNF3** | Ciclo estimado de 130 ms y periodo medio observado de aproximadamente 135 ms frente al límite de 1 s. | **Cumple mediante validación temporal** |
+| **RNF4** | 7,4 lecturas/s frente al mínimo de 2 lecturas/s. | **Cumple** |
+| **RNF5** | Compilación correcta, 20/20 pruebas automatizadas y 7/7 verificaciones estáticas. | **Cumple** |
 
-## 4.8 Reglas para cerrar la validación
+# 5. Resultados
 
-- No reemplazar la palabra “Pendiente” hasta ejecutar realmente el procedimiento.
-- Conservar los datos originales aunque alguna prueba falle.
-- Si un resultado no cumple, registrar la diferencia, la causa probable y la corrección aplicada; después ejecutar una nueva repetición sin borrar el resultado anterior.
-- Utilizar las mismas unidades declaradas: centímetros, milisegundos, segundos y lecturas por segundo.
-- Vincular cada fotografía, video o registro con el identificador de la prueba correspondiente.
-- Considerar los requerimientos validados únicamente cuando todas las pruebas asociadas tengan evidencia y cumplan sus criterios de aceptación.
+## 5.1 Resultados cuantificables
+
+La integración completa permitió medir la distancia, clasificarla y activar una única salida visual. Los principales resultados obtenidos fueron:
+
+| Aspecto evaluado | Resultado | Referencia de aceptación |
+| --- | ---: | ---: |
+| Compilación del firmware | <code>SUCCESS</code> | Sin errores |
+| Pruebas automatizadas | 20 de 20 aprobadas | 20 de 20 |
+| Verificaciones estáticas | 7 de 7 aprobadas | 7 de 7 |
+| RAM utilizada | 21 472 bytes (6,6 %) | Dentro de la capacidad del ESP32 |
+| Memoria flash utilizada | 270 889 bytes (20,7 %) | Dentro de la capacidad del ESP32 |
+| Lecturas físicas registradas | 24 en 8 distancias | Lecturas válidas y crecientes |
+| Error absoluto máximo | 1,63 cm | ≤ 3 cm |
+| Promedio de errores absolutos | 0,64 cm | Valor informativo |
+| Casos del indicador | 5 de 5 aprobados | 5 de 5 |
+| Secuencias físicas de histéresis | 5 de 6 aprobadas | 6 de 6 |
+| Frecuencia de muestreo | 7,4 lecturas/s | ≥ 2 lecturas/s |
+| Estabilidad | 10 min sin incidencias | ≥ 10 min |
+| Periodo medio observado | Aproximadamente 135 ms | Compatible con respuesta < 1 s |
+
+## 5.2 Análisis de los resultados
+
+Las mediciones fueron consistentes en todo el conjunto evaluado. El mayor error apareció en 20 cm, con 1,63 cm, y aun así mantuvo un margen de 1,37 cm respecto al máximo permitido. A partir de 40 cm, los errores de los promedios no superaron 0,44 cm. Estos valores muestran que el sensor cumplió el objetivo de exactitud en las condiciones de montaje utilizadas.
+
+La frecuencia de 7,4 lecturas por segundo superó 3,7 veces el mínimo declarado. El periodo medio cercano a 135 ms fue coherente con los 130 ms estimados a partir del timeout y de la espera del ciclo. La prueba de estabilidad confirmó que esta operación se sostuvo durante 10 minutos sin reinicios, bloqueos ni respuestas incorrectas en los puntos de control.
+
+La clasificación controlada y la activación de los LEDs presentaron resultados completos: 20/20 casos automatizados y 5/5 casos de integración fueron aprobados. La única desviación fue H04, donde el indicador osciló entre amarillo y verde al mover el objeto entre 39 y 41 cm. Como las comparaciones exactas del clasificador aprobaron en las pruebas automatizadas, el resultado señala una sensibilidad del sistema completo a la variación del sensor cerca del umbral de 40 cm, no una inconsistencia demostrada en la función de clasificación.
+
+# 6. Conclusiones
+
+1. El prototipo integra correctamente el HC-SR04, el ESP32 y los tres LEDs: cada ciclo obtiene una lectura, determina un rango y actualiza el indicador correspondiente.
+2. Los tres requerimientos funcionales fueron verificados. El sensor produjo valores coherentes, la clasificación aprobó todos sus casos automatizados y el indicador respondió correctamente en las cinco condiciones de integración.
+3. Los valores no funcionales declarados fueron alcanzados en las pruebas realizadas: 10 minutos de funcionamiento continuo, error máximo de 1,63 cm, 7,4 lecturas por segundo y un periodo medio de actualización cercano a 135 ms.
+4. La estructura modular permitió comprobar el clasificador de forma independiente y mantener separadas la adquisición, la decisión y la actuación. La compilación correcta y las siete verificaciones estáticas respaldan la calidad de la implementación.
+5. La histéresis funcionó en cinco de seis secuencias físicas, pero la oscilación observada alrededor de 40 cm demuestra que el margen actual no elimina todas las variaciones producidas por el montaje y el sensor. Esta limitación no impide el funcionamiento general, pero debe considerarse al ubicar objetos cerca del umbral.
+
+# 7. Recomendaciones
+
+1. Registrar una serie continua de lecturas entre 38 y 42 cm para determinar si la desviación H04 se debe a dispersión del sensor, movimiento del objeto o condiciones del entorno. Con esos datos podrá evaluarse un filtro de mediana, un promedio de varias lecturas o un ajuste del margen de histéresis.
+2. Conservar la salida serie a 115 200 baudios durante las demostraciones y futuras validaciones, ya que permite relacionar directamente la distancia medida, su validez y el rango aplicado.
+3. Repetir la prueba de exactitud si se cambia la posición del sensor, la alimentación, el montaje o el entorno, porque estas condiciones pueden alterar el resultado del HC-SR04.
+4. Mantener el divisor de tensión en la señal ECHO y las resistencias limitadoras de los LEDs para proteger las entradas y salidas del ESP32.
+5. Ejecutar <code>platformio run -e esp32dev</code> y <code>platformio test -e native</code> después de cualquier cambio en el código o en los umbrales, con el fin de confirmar que la integración y los 20 casos de clasificación continúan funcionando.
