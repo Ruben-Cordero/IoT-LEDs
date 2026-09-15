@@ -838,13 +838,13 @@ Las 24 lecturas fueron coherentes con el incremento de la distancia. El error ab
 
 **Objetivo:** comprobar el comportamiento conjunto sensor → clasificador → indicador.
 
-| Caso | Preparación | Resultado esperado | Resultado observado | Estado |
-| --- | --- | --- | --- | --- |
-| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Solo LED rojo encendido. | **Aprobado** |
-| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Solo LED amarillo encendido. | **Aprobado** |
-| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Solo LED verde encendido. | **Aprobado** |
-| I04 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Los tres LEDs apagados. | **Aprobado** |
-| I05 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Los tres LEDs apagados por estar fuera del rango de trabajo. | **Aprobado** |
+| Caso | Preparación | Resultado esperado | Resultado observado | Estado | Evidencia |
+| --- | --- | --- | --- | --- | --- |
+| I01 | Objeto estable a 10 cm | Solo LED rojo encendido. | Solo LED rojo encendido. | **Aprobado** | Anexo 1 |
+| I02 | Objeto estable a 30 cm | Solo LED amarillo encendido. | Solo LED amarillo encendido. | **Aprobado** | Anexo 2 |
+| I03 | Objeto estable a 60 cm | Solo LED verde encendido. | Solo LED verde encendido. | **Aprobado** | Anexo 3 |
+| I04 | Objeto estable por encima de 200 cm y dentro del alcance físico | Los tres LEDs apagados por estar fuera del rango de trabajo. | Los tres LEDs apagados por estar fuera del rango de trabajo. | **Aprobado** | Anexo 4 |
+| I05 | Retirar el objeto para provocar timeout | Los tres LEDs apagados. | Los tres LEDs apagados. | **Aprobado** | Anexo 5 |
 
 **Procedimiento:** colocar el objeto en cada condición, esperar al menos un segundo y observar los tres LEDs. En ningún caso válido pueden permanecer encendidos dos LEDs simultáneamente.
 
@@ -975,3 +975,47 @@ La clasificación controlada y la activación de los LEDs presentaron resultados
 3. Repetir la prueba de exactitud si se cambia la posición del sensor, la alimentación, el montaje o el entorno, porque estas condiciones pueden alterar el resultado del HC-SR04.
 4. Mantener las resistencias limitadoras de 220 Ω en los tres LEDs y verificar que las conexiones permanezcan firmes durante las mediciones.
 5. Ejecutar <code>platformio run -e esp32dev</code> y <code>platformio test -e native</code> después de cualquier cambio en el código o en los umbrales, con el fin de confirmar que la integración y los 20 casos de clasificación continúan funcionando.
+
+# 8. Anexos
+
+Los siguientes anexos presentan la evidencia fotográfica de los cinco casos ejecutados en <code>PR-INDICADOR-001</code>. En cada fotografía se observa el montaje utilizado, la distancia de referencia cuando corresponde y el estado de los LEDs.
+
+## 8.1 Anexo 1 — Objeto a 10 cm
+
+**Caso relacionado:** I01.
+
+El objeto se colocó a 10 cm del sensor. Esta distancia pertenece al rango <code>CERCANO</code>; por tanto, el resultado esperado era mantener encendido únicamente el LED rojo. La fotografía muestra que el comportamiento observado coincidió con el esperado.
+
+![Prueba con objeto a 10 cm y LED rojo encendido](<anexos/Anexo 1.jpeg>)
+
+## 8.2 Anexo 2 — Objeto a 30 cm
+
+**Caso relacionado:** I02.
+
+El objeto se colocó a 30 cm del sensor. Esta distancia pertenece al rango <code>MEDIO</code>; por tanto, el resultado esperado era mantener encendido únicamente el LED amarillo. La fotografía muestra que el comportamiento observado coincidió con el esperado.
+
+![Prueba con objeto a 30 cm y LED amarillo encendido](<anexos/Anexo 2.jpeg>)
+
+## 8.3 Anexo 3 — Objeto a 60 cm
+
+**Caso relacionado:** I03.
+
+El objeto se colocó a 60 cm del sensor. Esta distancia pertenece al rango <code>LEJANO</code>; por tanto, el resultado esperado era mantener encendido únicamente el LED verde. La fotografía muestra que el comportamiento observado coincidió con el esperado.
+
+![Prueba con objeto a 60 cm y LED verde encendido](<anexos/Anexo 3.jpeg>)
+
+## 8.4 Anexo 4 — Objeto fuera del rango de trabajo
+
+**Caso relacionado:** I04.
+
+El objeto se colocó a una distancia superior a 200 cm. Al encontrarse fuera del rango de trabajo definido, el sistema debía clasificar la condición como <code>ERROR</code> y mantener apagados los tres LEDs. La fotografía muestra la condición utilizada y la ausencia de un LED indicador encendido.
+
+![Prueba con objeto a más de 200 cm y los LEDs apagados](<anexos/Anexo 4.jpeg>)
+
+## 8.5 Anexo 5 — Ausencia de objeto
+
+**Caso relacionado:** I05.
+
+Se retiró el objeto del área de detección para provocar la ausencia de eco. En esta condición, la lectura debía considerarse inválida y los tres LEDs debían permanecer apagados. La fotografía muestra el sensor sin un objeto colocado frente a él y sin LEDs indicadores encendidos.
+
+![Prueba sin objeto y con los LEDs apagados](<anexos/Anexo 5.jpeg>)
