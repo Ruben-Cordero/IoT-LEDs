@@ -119,7 +119,7 @@ flowchart LR
 
 ## 2.2 Diagrama de circuito
 
-El circuito utiliza alimentación y tierra comunes. Cada LED incorpora una resistencia de 330 Ω para limitar la corriente. La señal ECHO del HC-SR04 no se conecta directamente al GPIO26: pasa por un divisor de tensión que reduce su nivel antes de ingresar al ESP32.
+El circuito utiliza alimentación y tierra comunes. Cada LED incorpora una resistencia de 220 Ω para limitar la corriente. La señal ECHO del HC-SR04 se conecta directamente al GPIO26 del ESP32, de acuerdo con el montaje utilizado en el prototipo.
 
 ~~~mermaid
 flowchart LR
@@ -140,13 +140,9 @@ flowchart LR
         SGND["GND"]
     end
 
-    RUP["Resistencia superior<br/>del divisor"]
-    NODE["Nivel reducido<br/>aprox. 3.3 V"]
-    RDOWN["Resistencia inferior<br/>del divisor"]
-
-    RR["330 Ω"]
-    RA["330 Ω"]
-    RV["330 Ω"]
+    RR["220 Ω"]
+    RA["220 Ω"]
+    RV["220 Ω"]
     LR["LED rojo"]
     LA["LED amarillo"]
     LV["LED verde"]
@@ -154,8 +150,7 @@ flowchart LR
     V5 --> VCC
     GND --- SGND
     P25 --> TRIG
-    ECHO --> RUP --> NODE --> P26
-    NODE --> RDOWN --> GND
+    ECHO --> P26
 
     P27 --> RR --> LR --> GND
     P32 --> RA --> LA --> GND
@@ -167,10 +162,10 @@ flowchart LR
 | HC-SR04 VCC | Pin de 5 V del ESP32 |
 | HC-SR04 GND | GND común |
 | HC-SR04 TRIG | GPIO25 |
-| HC-SR04 ECHO | Divisor de tensión y luego GPIO26 |
-| LED rojo | GPIO27 → resistencia de 330 Ω → ánodo; cátodo → GND |
-| LED amarillo | GPIO32 → resistencia de 330 Ω → ánodo; cátodo → GND |
-| LED verde | GPIO33 → resistencia de 330 Ω → ánodo; cátodo → GND |
+| HC-SR04 ECHO | Conexión directa a GPIO26 |
+| LED rojo | GPIO27 → resistencia de 220 Ω → ánodo; cátodo → GND |
+| LED amarillo | GPIO32 → resistencia de 220 Ω → ánodo; cátodo → GND |
+| LED verde | GPIO33 → resistencia de 220 Ω → ánodo; cátodo → GND |
 
 ## 2.3 Diagrama estructural
 
@@ -347,6 +342,7 @@ La configuración está declarada en [<code>platformio.ini</code>](../platformio
 platform = espressif32
 board = esp32dev
 framework = arduino
+monitor_speed = 115200
 ~~~
 
 ## 3.2 Organización del código fuente
@@ -779,8 +775,8 @@ La prueba de muestreo registró 74 ciclos en 10 segundos, equivalentes a un peri
 ### 4.5.1 Equipo necesario
 
 - ESP32 con el firmware cargado.
-- HC-SR04 conectado mediante divisor de tensión en ECHO.
-- Tres LEDs con sus resistencias limitadoras de 330 Ω.
+- HC-SR04 con TRIG conectado a GPIO25 y ECHO conectado directamente a GPIO26.
+- Tres LEDs con sus resistencias limitadoras de 220 Ω.
 - Objeto plano y estable, colocado perpendicularmente al sensor.
 - Cinta métrica o regla con resolución mínima de 1 mm.
 - Cronómetro para la prueba de estabilidad.
@@ -977,5 +973,5 @@ La clasificación controlada y la activación de los LEDs presentaron resultados
 1. Registrar una serie continua de lecturas entre 38 y 42 cm para determinar si la desviación H04 se debe a dispersión del sensor, movimiento del objeto o condiciones del entorno. Con esos datos podrá evaluarse un filtro de mediana, un promedio de varias lecturas o un ajuste del margen de histéresis.
 2. Conservar la salida serie a 115 200 baudios durante las demostraciones y futuras validaciones, ya que permite relacionar directamente la distancia medida, su validez y el rango aplicado.
 3. Repetir la prueba de exactitud si se cambia la posición del sensor, la alimentación, el montaje o el entorno, porque estas condiciones pueden alterar el resultado del HC-SR04.
-4. Mantener el divisor de tensión en la señal ECHO y las resistencias limitadoras de los LEDs para proteger las entradas y salidas del ESP32.
+4. Mantener las resistencias limitadoras de 220 Ω en los tres LEDs y verificar que las conexiones permanezcan firmes durante las mediciones.
 5. Ejecutar <code>platformio run -e esp32dev</code> y <code>platformio test -e native</code> después de cualquier cambio en el código o en los umbrales, con el fin de confirmar que la integración y los 20 casos de clasificación continúan funcionando.
